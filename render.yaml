@@ -1,0 +1,59 @@
+# Render Blueprint. Push this repo to GitHub, then in Render:
+#   New > Blueprint > connect this repo. It provisions all three resources.
+# After the first deploy you must fill in two cross-referencing URLs
+# (CORS_ORIGINS and VITE_API_URL) — see README "Deploy to Render", step 5.
+
+databases:
+  - name: nexa-db
+    plan: free          # free Postgres expires after ~30 days; bump for production
+    region: oregon      # India team? See README about the singapore region
+
+services:
+  # ---- Backend API (FastAPI) ----
+  - type: web
+    name: nexa-api
+    runtime: python
+    region: oregon
+    plan: free          # free web services cold-start after inactivity
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexa-db
+          property: connectionString
+      - key: GCP_PROJECT
+        sync: false                # prompted at deploy
+      - key: BQ_LOCATION
+        value: US
+      - key: VERTEX_LOCATION
+        value: us-central1
+      - key: GCP_SA_KEY_JSON
+        sync: false                # paste the whole service-account JSON
+      - key: FETCH_PROVIDER
+        value: vertex
+      - key: FETCH_MODEL
+        value: gemini-2.5-flash
+      - key: VIZ_MODEL
+        value: gemini-2.5-pro
+      - key: OPENAI_API_KEY
+        sync: false                # only needed if FETCH_PROVIDER=openai
+      - key: CORS_ORIGINS
+        sync: false                # set to the web URL after first deploy
+
+  # ---- Frontend (static React build) ----
+  - type: web
+    name: nexa-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false                # set to the API URL after first deploy
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html   # SPA fallback so React Router works

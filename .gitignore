@@ -1,0 +1,19 @@
+# NEVER commit credentials
+*.json
+!frontend/package.json
+!package-lock.json
+*-key.json
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+
+# Node
+node_modules/
+dist/
