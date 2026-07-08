@@ -100,6 +100,17 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
         score_penalty_shorts=("cloudwatch", "event_engagement"),
     ),
     RoutingRule(
+        id="nps_form_responses",
+        table_short="academy_nps_form_responses",
+        question_re=re.compile(
+            r"\bnps\s+form|\bnps\b.{0,40}\bform\s+responses?|"
+            r"\bnet promoter\b.{0,40}\bfeedback\b",
+            re.I,
+        ),
+        reason="NPS form free-text responses",
+        score_penalty_shorts=("contextual_feedback", "cloudwatch"),
+    ),
+    RoutingRule(
         id="contextual_feedback",
         table_short="users_contextual_feedback_details",
         question_re=re.compile(r"\bfeedback\b|\bemoji\b", re.I),
@@ -131,7 +142,13 @@ def detect_domain_signals(question: str) -> set[str]:
         signals.add("learning_portal")
     if _PLATFORM_ACTIVE.search(q):
         signals.add("platform_active")
-    if re.search(r"\bfeedback\b|\bemoji\b", q, re.I):
+    if re.search(
+        r"\bnps\s+form|\bnps_form_responses|net promoter\b.{0,40}\bform\b",
+        q,
+        re.I,
+    ):
+        signals.add("nps_form_responses")
+    elif re.search(r"\bfeedback\b|\bemoji\b", q, re.I):
         signals.add("contextual_feedback")
     return signals
 

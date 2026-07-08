@@ -31,9 +31,12 @@ _FEEDBACK_KEYWORD = re.compile(
 def is_feedback_table_question(question: str) -> bool:
     """True only when the question targets survey/feedback tables — not user/master analytics."""
     from question_intent import expand_question_abbreviations
+    from query_planner import is_nps_topic_feedback_question
 
     q = expand_question_abbreviations((question or "").strip())
     if not q:
+        return False
+    if is_nps_topic_feedback_question(q):
         return False
     # Jobs / placements / salary analytics never belong on feedback tables.
     if re.search(r"\b(placed|placement|hired|lpa|ctc|salary|company|companies)\b", q, re.I):

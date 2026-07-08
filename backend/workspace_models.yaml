@@ -1093,6 +1093,22 @@ relations:
 
 id: academy_nps_form_responses
 type: model
+format: wide
+grain: one row per user per form_submission_month
+survey:
+  wide:
+    score_column: rating_on_scale_of_0_to_10
+    submitted_at_column: form_submission_datetime
+    month_column: form_submission_month
+    text_columns:
+      - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
+      - what_limited_the_value_you_expected_from_the_program
+      - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
+      - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
+      - please_share_what_specifically_helped_in_your_job_readiness_journey
+      - what_improvements_would_help_you_feel_more_job_ready
+      - what_aspects_helped_you_feel_job_ready
+      - please_share_a_short_notea_about_what_worked_well_for_you
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`aca\
   demy_nps_form_responses`"
 measures:
@@ -4903,6 +4919,23 @@ relations:
 
 id: nps_form_responses_nov_and_dec_2025
 type: model
+format: wide
+grain: one row per user per submitted_at
+survey:
+  wide:
+    score_column: on_a_scale_of_0_10_how_likely_are_you_to_recommend_nxtwaves_academy_program_to_a_friend_or_peer
+    submitted_at_column: submitted_at
+    month_column: submitted_at
+    text_columns:
+      - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
+      - what_limited_the_value_you_expected_from_the_program
+      - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
+      - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
+      - please_share_what_specifically_helped_in_your_job_readiness_journey
+      - what_improvements_would_help_you_feel_more_job_ready
+      - what_aspects_helped_you_feel_job_ready
+      - please_share_a_short_note_about_what_worked_well_for_you
+      - what_aspects_delivered_strong_value_to_you
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`nps\
   _form_responses_nov_and_dec_2025`"
 measures:
@@ -8544,6 +8577,22 @@ relations:
 
 id: z_users_contextual_feedback_details
 type: model
+format: long
+grain: one row per user per question response
+survey:
+  long:
+    question_col: question_text
+    answer_col: user_answer
+    trigger_col: feedback_trigger
+    type_col: question_type
+    topic_columns:
+      - user_answer
+      - question_text
+      - feedback_trigger
+topic_columns:
+  - user_answer
+  - question_text
+  - feedback_trigger
 description: >-
   Captures contextual, in-app user feedback collected on the CCBP learning platform
   based on specific user triggers (events or page visits).
@@ -8739,3 +8788,43 @@ relations:
   - id: z_ccbp_academy_users_aipl_daily_leaderboard_details
     type: many_to_one
     join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.user_id} AND ${submitted_date} = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.date}
+
+id: nps_all_form_responses
+type: logical_model
+format: wide
+description: >-
+  Unified NPS form responses across the ongoing monthly table and the Nov/Dec 2025
+  legacy snapshot. Use this model for topic search and feedback analysis spanning
+  all NPS submissions.
+union:
+  - academy_nps_form_responses
+  - nps_form_responses_nov_and_dec_2025
+union_align:
+  user_id: [user_id, user_id]
+  submitted_at: [form_submission_datetime, submitted_at]
+  form_submission_month: [form_submission_month, _derive_month]
+  nps_rating:
+    - rating_on_scale_of_0_to_10
+    - on_a_scale_of_0_10_how_likely_are_you_to_recommend_nxtwaves_academy_program_to_a_friend_or_peer
+  worked_well:
+    - please_share_a_short_noteA_about_what_worked_well_for_you
+    - please_share_a_short_note_about_what_worked_well_for_you
+  aspects_job_ready: [what_aspects_helped_you_feel_job_ready, what_aspects_helped_you_feel_job_ready]
+  improvements_job_ready:
+    - what_improvements_would_help_you_feel_more_job_ready
+    - what_improvements_would_help_you_feel_more_job_ready
+  limited_value:
+    - what_limited_the_value_you_expected_from_the_program
+    - what_limited_the_value_you_expected_from_the_program
+  improvements_recommend:
+    - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
+    - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
+  helped_journey:
+    - please_share_what_specifically_helped_in_your_job_readiness_journey
+    - please_share_what_specifically_helped_in_your_job_readiness_journey
+  aspects_recommend:
+    - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
+    - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
+  value_for_money:
+    - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
+    - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested

@@ -256,9 +256,12 @@ def _is_feedback_question(question: str) -> bool:
         return False
     from feedback_sql import is_feedback_table_question
     from nps_sql import is_nps_analytics_question
+    from query_planner import classify_intent
 
     q = (question or "").strip()
     if is_nps_analytics_question(q):
+        return False
+    if classify_intent(q) == "topic_search":
         return False
     return is_feedback_table_question(q)
 
@@ -481,6 +484,71 @@ def _try_feedback_template_sql(
     if violations:
         return None
     return sql
+
+
+def _try_planner_sql(
+    question: str,
+    selected_tables: list,
+    hints_map: dict,
+    inferred: dict,
+    columns_by_table: dict[str, set[str]],
+    *,
+    catalog_tables: list | None = None,
+    schema_entities: list | None = None,
+) -> tuple[str | None, str, list | None]:
+    """Model-facing query planner — topic search, survey distribution, aggregates."""
+    if not config.HEX_STYLE_PIPELINE:
+        return None, "", None
+    from memory_lookup import sql_matches_question_intent
+    from query_compose import compose_query_plan
+    from query_planner import try_build_query_plan
+
+    pool = catalog_tables or selected_tables
+    plan = try_build_query_plan(
+        question,
+        selected_tables,
+        catalog_tables=pool,
+        columns_by_table=columns_by_table,
+    )
+    if not plan:
+        return None, "", None
+    raw = compose_query_plan(
+        plan,
+        question,
+        selected_tables,
+        columns_by_table,
+        catalog_tables=pool,
+    )
+    if not raw:
+        return None, plan.reason, None
+    try:
+        sql = bq.validate_select_only(raw)
+    except ValueError:
+        return None, plan.reason, None
+    if not sql_matches_question_intent(question, sql, schema_entities=schema_entities):
+        return None, plan.reason, None
+    violations = validate_sql(
+        sql,
+        question,
+        selected_tables,
+        hints_map,
+        inferred,
+        columns_by_table=columns_by_table,
+    )
+    if violations:
+        return None, plan.reason, None
+    planner_tables = list(selected_tables)
+    if plan.union_member_ids:
+        from semantic_layer import semantic_by_model_id
+
+        for mid in plan.union_member_ids:
+            sem = semantic_by_model_id(mid)
+            if not sem or not sem.full_table_id:
+                continue
+            for t in pool:
+                if t.full_table_id == sem.full_table_id and t not in planner_tables:
+                    planner_tables.append(t)
+    return sql, plan.reason, planner_tables or None
 
 
 def _try_semantic_template_sql(
@@ -1690,14 +1758,25 @@ def iter_ask(
 
                 clar_payload = None
                 semantic_reason = ""
-                template_sql, semantic_reason, semantic_tables = _try_semantic_template_sql(
+                template_sql, semantic_reason, semantic_tables = _try_planner_sql(
                     question,
                     selected,
                     hints_map,
                     inferred,
                     columns_by_table,
                     catalog_tables=included_tables,
+                    schema_entities=query_ctx.schema_entities,
                 )
+                sql_source = "planner" if template_sql else sql_source
+                if not template_sql:
+                    template_sql, semantic_reason, semantic_tables = _try_semantic_template_sql(
+                        question,
+                        selected,
+                        hints_map,
+                        inferred,
+                        columns_by_table,
+                        catalog_tables=included_tables,
+                    )
                 ask_trace(
                     "semantic_sql",
                     question=question[:200],
@@ -1705,13 +1784,13 @@ def iter_ask(
                     reason=semantic_reason[:200] if semantic_reason else "",
                     sql_preview=(template_sql or "")[:300],
                 )
-                if template_sql:
-                    sql_source = "semantic"
-                    if semantic_tables:
-                        selected = semantic_tables
-                        knowledges = [kb.load_table_knowledge(t) for t in selected]
-                        hints_map = _column_hints_map(selected)
-                        inferred, columns_by_table = _infer_hints_for_tables(selected)
+                if template_sql and semantic_tables:
+                    if sql_source != "planner":
+                        sql_source = "semantic"
+                    selected = semantic_tables
+                    knowledges = [kb.load_table_knowledge(t) for t in selected]
+                    hints_map = _column_hints_map(selected)
+                    inferred, columns_by_table = _infer_hints_for_tables(selected)
                 if not template_sql:
                     template_sql = _try_nps_template_sql(
                         question,
@@ -1761,6 +1840,7 @@ def iter_ask(
                     skip_intent = is_nps_analytics_question(question) or sql_source in (
                         "semantic",
                         "domain",
+                        "planner",
                     )
                     if not skip_intent and not sql_matches_question_intent(
                         question,
