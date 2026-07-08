@@ -1,0 +1,710 @@
+<timestamp>Monday, Jul 6, 2026, 5:19 PM (UTC+5:30)</timestamp>
+<user_query>
+generate ai overview currentlly i will add 
+join hints now  update id: academy_nps_form_responses
+type: model
+base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`aca\
+  demy_nps_form_responses`"
+measures:
+  - id: count_of_records
+    func: count
+dimensions:
+  - id: user_month_key
+    type: string
+    expr_sql: CONCAT(${user_id}, '-', CAST(${form_submission_month} AS STRING))
+    unique: true
+    visibility: "internal"
+    description: Unique identifier combining user_id and form_submission_month for each user's monthly NPS response
+  - id: do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
+    type: string
+  - id: what_limited_the_value_you_expected_from_the_program
+    type: string
+  - id: what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
+    type: string
+  - id: user_id
+    type: string
+    description: Unique id of the user, UUID with hyphens
+  - id: form_submission_month
+    type: date
+    description: considering only the latest form response in a month
+  - id: what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
+    type: string
+  - id: please_share_what_specifically_helped_in_your_job_readiness_journey
+    type: string
+  - id: what_improvements_would_help_you_feel_more_job_ready
+    type: string
+  - id: rating_on_scale_of_0_to_10
+    type: number
+  - id: how_confident_are_you_in_becoming_job_ready_with_your_learning_at_nxtwaves_academy
+    type: number
+  - id: what_aspects_helped_you_feel_job_ready
+    type: string
+  - id: please_share_a_short_notea_about_what_worked_well_for_you
+    type: string
+    expr_sql: "`please_share_a_short_noteA_about_what_worked_well_for_you`"
+  - id: form_submission_datetime
+    type: timestamp_naive
+    description: form submitted datetime
+relations:
+  - id: z_ccbp_academy_users_master_data
+    type: many_to_one
+    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+  - id: y_academy_user_daily_engagement_time_spent
+    type: many_to_one
+    join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND DATE_TRUNC(${form_submission_month}, MONTH) = ${y_academy_user_daily_engagement_time_spent.calendar_date}
+  - id: z_academy_users_live_classes_attendance_and_time_spent_details
+    type: many_to_one
+    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id} AND DATE_TRUNC(${form_submission_month}, MONTH) = ${z_academy_users_live_classes_attendance_and_time_spent_details.slot_date}
+  - id: live_classes_user_feedback_responses
+    type: one_to_many
+    join_sql: ${user_id} = ${live_classes_user_feedback_responses.user_id} AND DATE_TRUNC(${form_submission_month}, MONTH) = DATE_TRUNC(${live_classes_user_feedback_responses.slot_date}, MONTH)
+  - id: z_academy_users_course_wise_completion_details
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id} AND DATE_TRUNC(${form_submission_month}, MONTH) = DATE_TRUNC(${z_academy_users_course_wise_completion_details.last_progress_date}, MONTH)
+
+id: z_users_contextual_feedback_details
+type: model
+description: >-
+  Captures contextual, in-app user feedback collected on the CCBP learning platform
+  based on specific user triggers (events or page visits).
+
+  Each row represents a single user's response to one question within a feedback survey.
+
+  Feedback surveys are triggered by micro user experiences such as visiting a page,
+  performing an action, or spending time on a feature.
+
+  IMPORTANT:
+  - A single feedback_id represents a full survey (multiple questions)
+  - Always analyze data based on the actual TEXT values of feedback_trigger and question_text — do NOT rely on feedback_type (EVENT/URL).
+  - feedback_type is a tech-team-side classification and is unreliable: an EVENT may be created for a page visit, and the same trigger context can be implemented as either EVENT or URL. Treat it as metadata only.
+  - Before answering stakeholder queries, always inspect the distinct feedback_trigger text values and question_text together to determine the real user context being measured.
+  - Same question_id may appear across multiple triggers
+  - Surveys are shown only once per user per feedback_id
+
+  Known Data Considerations:
+  - Some records have NULL feedback_trigger or malformed URL values (e.g., '//')
+  - user_answer format varies by question_type (numeric for EMOJI, text otherwise)
+  - enroll_plans_str is a JSON string and requires parsing for analysis
+base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`users_contextual_feedback_details`"
+measures:
+  - id: total_responses
+    func: count
+    description: Total number of question-level responses submitted
+  - id: unique_users
+    func: count_distinct
+    of: user_id
+    description: Number of unique users who submitted feedback
+  - id: unique_feedback_surveys
+    func: count_distinct
+    of: feedback_id
+    description: Number of unique feedback survey instances
+  - id: avg_emoji_rating
+    func: avg
+    of: emoji_rating
+    description: Average rating for EMOJI-type questions (scale typically 1–5)
+dimensions:
+  - id: user_feedback_question_key
+    type: string
+    expr_sql: CONCAT(${user_id}, '-', ${feedback_id}, '-', CAST(${question_id} AS STRING))
+    unique: true
+    visibility: "internal"
+    description: Unique key representing one user's response to a specific question in a feedback survey
+  - id: user_id
+    type: string
+    description: Unique identifier for the user (UUID with hyphens)
+  - id: feedback_id
+    type: string
+    description: Unique identifier for a feedback survey instance (group of questions)
+  - id: feedback_trigger
+    type: string
+    description: >-
+      Trigger that caused the feedback survey to appear.
+      Can be a URL path (e.g., /course-library, /leaderboard) or an event name
+      (e.g., VISITED_COURSE_LIBRARY_V2).
+      This is the most important dimension for analysis. Always segment or filter by this.
+  - id: feedback_type
+    type: string
+    description: >-
+      Tech-side classification of the trigger (EVENT or URL).
+      WARNING: This is set by the tech team and is NOT a reliable indicator of user context — an EVENT may be created for a page visit and vice versa.
+      Do NOT segment or filter analysis purely on this field. Always rely on the actual text of feedback_trigger and question_text to interpret the user experience being measured.
+  - id: question_id
+    type: number
+    description: Unique identifier of the question
+  - id: question_order
+    type: number
+    description: Order of the question within the feedback survey
+  - id: question_type
+    type: string
+    description: >-
+      Type of question. Exact enum values -
+        • EMOJI            (rating scale)
+        • SINGLE_SELECT
+        • MULTI_SELECT
+        • TEXTUAL
+  - id: question_text
+    type: string
+    description: Actual question shown to the user
+  - id: user_answer
+    type: string
+    description: Raw response submitted by the user (format varies by question type)
+  - id: emoji_rating
+    type: number
+    expr_sql: SAFE_CAST(${user_answer} AS INT64)
+    description: Numeric rating extracted from user_answer for EMOJI-type questions
+  - id: submitted_date
+    type: date
+    description: Date when the feedback was submitted
+  - id: enroll_plans_str
+    type: string
+    description: JSON string containing list of user's enrolled plans
+  - id: is_valid_question
+    type: boolean
+    expr_sql: >
+      ${question_id} IS NOT NULL 
+      AND ${question_order} IS NOT NULL 
+      AND ${question_type} IS NOT NULL
+    description: TRUE if essential question fields are present
+  - id: is_valid_trigger
+    type: boolean
+    expr_sql: >
+      ${feedback_trigger} IS NOT NULL 
+      AND ${feedback_trigger} NOT IN ('', '//')
+    description: TRUE if feedback trigger is valid and usable for analysis
+relations:
+  - id: z_ccbp_academy_users_master_data
+    type: many_to_one
+    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+  - id: academy_user_profile_basic_details
+    type: many_to_one
+    join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
+  - id: academy_user_profile_education_details
+    type: many_to_one
+    join_sql: ${user_id} = ${academy_user_profile_education_details.user_id}
+  - id: y_academy_user_daily_engagement_time_spent
+    type: many_to_one
+    join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${submitted_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
+  - id: z_academy_users_npc_master_table
+    type: many_to_one
+    join_sql: ${user_id} = ${z_academy_users_npc_master_table.user_id} AND DATE_TRUNC(${submitted_date}, MONTH) = ${z_academy_users_npc_master_table.calendar_month}
+  - id: z_academy_users_course_wise_completion_details
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id}
+  - id: z_academy_users_live_classes_attendance_and_time_spent_details
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}
+  - id: z_academy_users_live_classes_recordings_watched_details
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_live_classes_recordings_watched_details.user_id}
+  - id: live_classes_user_feedback_responses
+    type: one_to_many
+    join_sql: ${user_id} = ${live_classes_user_feedback_responses.user_id}
+  - id: live_class_cohort_slot_wise_users_ivschats3_data
+    type: one_to_many
+    join_sql: ${user_id} = ${live_class_cohort_slot_wise_users_ivschats3_data.user_id}
+  - id: academy_nps_form_responses
+    type: many_to_one
+    join_sql: ${user_id} = ${academy_nps_form_responses.user_id} AND DATE_TRUNC(${submitted_date}, MONTH) = ${academy_nps_form_responses.form_submission_month}
+  - id: nps_form_responses_nov_and_dec_2025
+    type: many_to_one
+    join_sql: ${user_id} = ${nps_form_responses_nov_and_dec_2025.user_id}
+  - id: academy_student_success_salesforce_task_details
+    type: one_to_many
+    join_sql: ${user_id} = ${academy_student_success_salesforce_task_details.user_id}
+  - id: academy_dpd_salesforce_task_details
+    type: one_to_many
+    join_sql: ${user_id} = ${academy_dpd_salesforce_task_details.user_id}
+  - id: z_academy_users_topin_tech_assessments
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments.user_id}
+  - id: z_academy_users_topin_tech_assessments_section_wise_scores
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments_section_wise_scores.user_id}
+  - id: academy_nbfc_renewals_conversion_details
+    type: many_to_one
+    join_sql: ${user_id} = ${academy_nbfc_renewals_conversion_details.user_id} AND DATE_TRUNC(${submitted_date}, MONTH) = ${academy_nbfc_renewals_conversion_details.month}
+  - id: y_academy_user_event_engagement_details
+    type: one_to_many
+    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+  - id: y_academy_users_placements_details
+    type: one_to_many
+    join_sql: ${user_id} = ${y_academy_users_placements_details.user_id}
+  - id: ai_chat_bot_users_session_details
+    type: one_to_many
+    join_sql: ${user_id} = ${ai_chat_bot_users_session_details.user_id}
+  - id: ai_chat_bot_users_ticket_details
+    type: one_to_many
+    join_sql: ${user_id} = ${ai_chat_bot_users_ticket_details.user_id}
+  - id: academy_users_day_and_page_wise_time_spent_details
+    type: many_to_one
+    join_sql: ${user_id} = ${academy_users_day_and_page_wise_time_spent_details.user_id} AND ${submitted_date} = ${academy_users_day_and_page_wise_time_spent_details.time_spent_date}
+  - id: z_ccbp_users_cloudwatch_interactions_with_nav_bar
+    type: one_to_many
+    join_sql: ${user_id} = ${z_ccbp_users_cloudwatch_interactions_with_nav_bar.user_id}
+  - id: user_queries_on_search_bar
+    type: one_to_many
+    join_sql: ${user_id} = ${user_queries_on_search_bar.user_id}
+  - id: acad_tcs_nqt_prep_26_form_responses
+    type: one_to_many
+    join_sql: ${user_id} = ${acad_tcs_nqt_prep_26_form_responses.user_id}
+  - id: all_users_bot_raw_conversation_details
+    type: one_to_many
+    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_bot_raw_conversation_details.user_id}
+  - id: all_users_question_wise_responses_summary_details_for_question_set_units
+    type: one_to_many
+    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
+  - id: all_users_question_attempt_details_for_question_set_units
+    type: one_to_many
+    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_attempt_details_for_question_set_units.user_id}
+  - id: z_ccbp_academy_users_aipl_daily_leaderboard_details
+    type: many_to_one
+    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.user_id} AND ${submitted_date} = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.date}
+ 
+
+id: nps_form_responses_nov_and_dec_2025
+type: model
+base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`nps\
+  _form_responses_nov_and_dec_2025`"
+measures:
+  - id: count_of_records
+    func: count
+dimensions:
+  - id: user_submission_key
+    type: string
+    expr_sql: CONCAT(${user_id}, '-', CAST(${submitted_at} AS STRING))
+    unique: true
+    visibility: "internal"
+    description: Unique identifier combining user_id and submitted_at for each user's NPS form submission
+  - id: please_share_what_specifically_helped_in_your_job_readiness_journey
+    type: string
+  - id: do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
+    type: string
+  - id: on_a_scale_of_0_10_how_likely_are_you_to_recommend_nxtwaves_academy_program_to_a_friend_or_peer
+    type: number
+  - id: what_improvements_would_help_you_feel_more_job_ready
+    type: string
+  - id: what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
+    type: string
+  - id: please_share_a_short_note_about_what_worked_well_for_you
+    type: string
+  - id: what_limited_the_value_you_expected_from_the_program
+    type: string
+  - id: what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
+    type: string
+  - id: submitted_at
+    type: timestamp_naive
+  - id: user_id
+    type: string
+  - id: first_name
+    type: string
+  - id: what_aspects_delivered_strong_value_to_you
+    type: string
+  - id: last_name
+    type: string
+  - id: how_confident_are_you_in_becoming_job_ready_with_your_learning_at_nxtwaves_academy
+    type: number
+  - id: what_aspects_helped_you_feel_job_ready
+    type: string
+relations:
+  - id: z_ccbp_academy_users_master_data
+    type: many_to_one
+    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+  - id: y_academy_user_daily_engagement_time_spent
+    type: one_to_many
+    join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id}
+  - id: z_academy_users_live_classes_attendance_and_time_spent_details
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}
+
+ 
+
+id: z_ccbp_academy_users_jobs_details
+type: model
+description: >-
+  This table captures the full life cycle of job interactions between academy
+  users and job opportunities available on the platform. It covers job creation
+  and configuration, user application activity, hiring process progression, and
+  final placement outcomes. Supports analysis across job application funnels,
+  placement conversion rates, user engagement patterns, salary benchmarks,
+  company hiring trends, and internship vs. full-time performance.
+
+  IMPORTANT SCOPE NOTE:
+  - This table contains ONLY users with active learning platform access (i.e.,
+    lp_status = 'ACTIVE'). Users whose access has expired or been revoked are
+    NOT present here. Any analysis derived from this table should be interpreted
+    as representing the active-access user base only, not the full academy user
+    population.
+
+  Key distinction:
+  - user_job_status is the top-level funnel stage (You Are Eligible, Applied,
+    Did Not Apply, Not Interested, Hiring Completed, Requirements Closed).
+  - user_job_application_status is only meaningful for users who applied and
+    tracks granular hiring pipeline stages (resume screening, assessments,
+    assignments, group discussion, telephonic, technical, HR rounds, Hired,
+    Not Selected).
+
+  Important considerations:
+  - **Hiring-cycle time metrics use CALENDAR TIME, not working hours.** All
+    `avg_days_*` measures spanning application -> process completion are
+    computed as raw wall-clock day differences between datetimes. They do NOT
+    exclude weekends, holidays, or non-working hours, and they do NOT apply any
+    placements-team / company-side hiring business calendar. An application
+    submitted on Friday and processed the following Tuesday will show 4 calendar
+    days even though only ~2 are working days. Whenever you query this table
+    for hiring-funnel SLA analysis (e.g. time-to-decision, time-to-hire), you
+    MUST surface this caveat to the stakeholder so they interpret the numbers
+    as calendar latency, not effective working-day latency.
+base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`z_c\
+  cbp_academy_users_jobs_details`"
+measures:
+  - id: count_of_records
+    func: count
+    description: Total number of user-job interaction records
+  - id: unique_users
+    func: count_distinct
+    of: user_id
+    description: Count of unique users who interacted with jobs
+  - id: unique_jobs
+    func: count_distinct
+    of: job_id
+    description: Count of unique job postings
+  - id: unique_organisations
+    func: count_distinct
+    of: organisation_id
+    description: Count of unique hiring organisations
+  - id: total_eligible_users
+    func: count_distinct
+    of: user_id
+    filters:
+      - is_eligible
+    description: Count of unique users who were eligible for jobs (user_job_status = 'You Are Eligible')
+  - id: total_applied_users
+    func: count_distinct
+    of: user_id
+    filters:
+      - is_applied
+    description: Count of unique users who applied to jobs
+  - id: total_not_interested_users
+    func: count_distinct
+    of: user_id
+    filters:
+      - is_not_interested
+    description: Count of unique users who marked themselves as not interested
+  - id: total_hired_users
+    func: count_distinct
+    of: user_id
+    filters:
+      - is_hired
+    description: Count of unique users who were hired (user_job_application_status = 'Hired')
+  - id: application_count
+    func: count
+    filters:
+      - is_applied
+    description: Total number of applications submitted
+  - id: hired_count
+    func: count
+    filters:
+      - is_hired
+    description: Total number of hires
+  - id: application_to_hire_rate
+    func_sql: SAFE_DIVIDE(COUNTIF(${is_hired}), COUNTIF(${is_applied})) * 100
+    description: Percentage of applications that resulted in a hire
+  - id: avg_min_ctc
+    func: avg
+    of: min_ctc
+    description: Average minimum CTC offered across jobs
+  - id: avg_max_ctc
+    func: avg
+    of: max_ctc
+    description: Average maximum CTC offered across jobs
+  - id: total_positions_available
+    func: sum
+    of: no_of_positions_available
+    description: Total number of open positions across all jobs
+  - id: avg_days_from_apply_to_process_done
+    func_sql: AVG(TIMESTAMP_DIFF(${process_done_datetime}, ${applied_datetime}, DAY))
+    description: >-
+      Average CALENDAR days from a user's application to the hiring process being marked complete (only rows with both applied_datetime and process_done_datetime contribute).
+      IMPORTANT - this is raw wall-clock time. It does NOT exclude weekends, holidays, or non-working hours, and does NOT apply any placements-team / company-side hiring business calendar.
+      Always flag this caveat to the stakeholder when reporting this metric — it represents calendar latency, not effective working-day latency.
+  - id: avg_days_from_job_creation_to_apply
+    func_sql: AVG(TIMESTAMP_DIFF(${applied_datetime}, ${job_creation_datetime}, DAY))
+    description: >-
+      Average CALENDAR days from job posting to user application (signals how quickly eligible users discover and act on a job).
+      IMPORTANT - this is raw wall-clock time. It does NOT exclude weekends, holidays, or non-working hours, and does NOT apply any business calendar.
+      Always flag this caveat to the stakeholder when reporting this metric — it represents calendar latency, not effective working-day latency.
+dimensions:
+  - id: user_job_key
+    type: string
+    expr_sql: CONCAT(${user_id}, '-', ${job_id})
+    unique: true
+    visibility: "internal"
+    description: Composite primary key combining user_id and job_id for each user-job interaction record
+  - id: user_id
+    type: string
+    description: Unique identifier for the user (32-character UUID without hyphens)
+  - id: job_id
+    type: string
+    description: Unique identifier for the job posting
+  - id: organisation_id
+    type: string
+    description: Unique identifier for the hiring organisation
+  - id: organisation_name
+    type: string
+    description: Name of the hiring organisation
+  - id: job_title
+    type: string
+    description: Title of the job role
+  - id: job_type
+    type: string
+    description: >-
+      Type of engagement. Exact enum values -
+        • INTERNSHIP
+        • FULL_TIME
+        • INTERNSHIP_AND_FULL_TIME
+  - id: job_source
+    type: string
+    description: >-
+      Origin of the job listing. Exact enum values -
+        • INTERNAL
+        • EXTERNAL
+  - id: job_status
+    type: string
+    description: >-
+      Current status of the job posting. Exact enum values -
+        • Open
+        • Hiring In Progress
+        • Hiring Completed
+        • Requirements Closed
+        • Yet To Start Interviews
+  - id: skills_required
+    type: string
+    description: Skills required for the role
+  - id: locations
+    type: string
+    description: Location(s) where the role is based
+  - id: no_of_positions_available
+    type: number
+    description: Number of open positions for the job
+  - id: min_ctc
+    type: number
+    description: Minimum CTC (Cost to Company) offered
+  - id: max_ctc
+    type: number
+    description: Maximum CTC (Cost to Company) offered
+  - id: service_agreement_in_months
+    type: number
+    description: Duration of service agreement required, in months
+  - id: perks
+    type: string
+    description: Additional perks or benefits offered
+  - id: job_creation_datetime
+    type: timestamp_naive
+    description: Datetime when the job was created in the system
+  - id: apply_by
+    type: timestamp_naive
+    description: Application deadline
+  - id: applied_datetime
+    type: timestamp_naive
+    description: Datetime when the user applied to the job. NULL if user has not applied.
+  - id: process_done_datetime
+    type: timestamp_naive
+    description: Datetime when the hiring process was completed
+  - id: user_job_status
+    type: string
+    description: >-
+      High-level/top-level funnel stage of the user's relationship with the job. Exact enum values -
+        • You Are Eligible
+        • Applied
+        • Did Not Apply
+        • Not Interested
+        • Hiring Completed
+        • Requirements Closed
+  - id: user_job_application_status
+    type: string
+    description: >-
+      Granular stage of the user's application in the hiring pipeline. Tracks
+      progress across rounds such as resume screening, assessments, assignments,
+      group discussion, telephonic, technical, and HR rounds, through to final
+      outcomes like Hired or Not Selected. Only meaningful for users who applied.
+  - id: not_interested_reason
+    type: string
+    description: Reason provided by the user for not applying. Populated when user_job_status = 'Not Interested'.
+  - id: enroll_plans_str
+    type: string
+    description: User's enrollment plan details, including any last-minute pro plans (JSON-like string)
+  - id: year_of_graduation
+    type: number
+    description: User's year of graduation
+  - id: applied_date
+    type: date
+    expr_sql: DATE(${applied_datetime})
+    description: Date when the user applied to the job
+  - id: job_creation_date
+    type: date
+    expr_sql: DATE(${job_creation_datetime})
+    description: Date when the job was created
+  - id: applied_month
+    type: date
+    expr_sql: DATE_TRUNC(DATE(${applied_datetime}), MONTH)
+    description: Month when the user applied to the job, truncated to first day of month
+  - id: is_eligible
+    type: boolean
+    expr_sql: ${user_job_status} = 'You Are Eligible'
+    description: TRUE if user is eligible but has not yet acted on the job
+    visibility: "internal"
+  - id: is_applied
+    type: boolean
+    expr_sql: ${user_job_status} = 'Applied'
+    description: TRUE if user applied to the job
+    visibility: "internal"
+  - id: is_not_interested
+    type: boolean
+    expr_sql: ${user_job_status} = 'Not Interested'
+    description: TRUE if user marked themselves as not interested
+    visibility: "internal"
+  - id: is_hired
+    type: boolean
+    expr_sql: ${user_job_application_status} = 'Hired'
+    description: TRUE if user was hired
+    visibility: "internal"
+  - id: is_internship
+    type: boolean
+    expr_sql: ${job_type} = 'INTERNSHIP'
+    description: TRUE if the job is internship-only
+    visibility: "internal"
+  - id: is_full_time
+    type: boolean
+    expr_sql: ${job_type} IN ('FULL_TIME', 'INTERNSHIP_AND_FULL_TIME')
+    description: TRUE if the job includes a full-time component
+    visibility: "internal"
+relations:
+  - id: z_ccbp_academy_users_master_data
+    type: many_to_one
+    join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
+  - id: academy_user_profile_basic_details
+    type: many_to_one
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+  - id: academy_user_profile_education_details
+    type: many_to_one
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+  - id: y_academy_user_daily_engagement_time_spent
+    type: many_to_one
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "") AND DATE(${applied_datetime}) = ${y_academy_user_daily_engagement_time_spent.calendar_date}
+  - id: z_academy_users_npc_master_table
+    type: many_to_one
+    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", "") AND DATE_TRUNC(DATE(${applied_datetime}), MONTH) = ${z_academy_users_npc_master_table.calendar_month}
+  - id: y_academy_users_placements_details
+    type: one_to_many
+    join_sql: ${user_id} = REPLACE(${y_academy_users_placements_details.user_id}, "-", "") AND ${job_id} = ${y_academy_users_placements_details.job_id}
+  - id: z_academy_users_topin_tech_assessments
+    type: one_to_many
+    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments.user_id}, "-", "")
+  - id: y_academy_user_event_engagement_details
+    type: one_to_many
+    join_sql: ${user_id} = ${y_academy_user_event_engagement_details.user_id}
+  - id: academy_nps_form_responses
+    type: many_to_one
+    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", "") AND DATE_TRUNC(DATE(${applied_datetime}), MONTH) = ${academy_nps_form_responses.form_submission_month}
+  - id: nps_form_responses_nov_and_dec_2025
+    type: many_to_one
+    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", "")
+  - id: academy_student_success_salesforce_task_details
+    type: one_to_many
+    join_sql: ${user_id} = REPLACE(${academy_student_success_salesforce_task_details.user_id}, "-", "")
+ 
+
+id: z_ccbp_academy_users_master_data
+type: model
+base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`z_c\
+  cbp_academy_users_master_data`"
+measures:
+  - id: count_of_records
+    func: count
+dimensions:
+  - id: user_id
+    type: string
+    unique: true
+    description: Unique identifier of the user in the Academy system
+  - id: bachelors_institute_name
+    type: string
+    description: Name of the institute from which the user is pursuing or has
+      completed their bachelor’s degree
+  - id: pause_status
+    type: string
+    description: Indicates whether the user’s learning schedule is paused; 'Pause'
+      means paused, NULL means active
+  - id: preferred_languages_for_communication
+    type: string
+    description: Preferred language(s) selected by the user for communication
+  - id: growth_cycle_title
+    type: string
+    description: Title of the growth cycle currently assigned to the user
+  - id: latest_retention_bucket_streak
+    type: number
+    description: Number of consecutive days the user has remained in the current
+      retention bucket
+  - id: latest_retention_bucket
+    type: string
+    description: Retention classification of the user based on recent learning activity
+  - id: growth_cycle_name_enum
+    type: string
+    description: Enum value representing the growth cycle assigned to the user
+  - id: no_of_other_sets_completed
+    type: number
+    description: Total number of other non-standard sets completed by the user
+  - id: no_of_learning_sets_completed
+    type: number
+    description: Total number of learning sets completed by the user
+  - id: bachelors_end_year
+    type: number
+    description: Year in which the user completed or is expected to complete their
+      bachelor’s degree
+  - id: gender
+    type: string
+    description: Gender of the user as reported during onboarding or profile setup
+  - id: learning_portal_onboarding_access_given_datetime
+    type: timestamp_naive
+    description: Datetime when access to the learning portal was granted to the user
+  - id: no_of_question_sets_completed
+    type: number
+    description: Total number of coding or problem-solving question sets completed
+      by the user
+  - id: no_of_practice_sets_completed
+    type: number
+    description: Total number of practice sets completed by the user
+  - id: success_coach_object_id
+    type: string
+    description: Salesforce ID of the student
+  - id: success_coach_email
+    type: string
+    description: Mail ID of the success coach assigned to the student
+  - id: sr_success_coach_email
+    type: string
+    description: Mail ID of the senior success coach assigned to the student
+
+relations:
+  - id: y_academy_user_daily_engagement_time_spent
+    type: one_to_many
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "")
+  - id: z_academy_users_live_classes_attendance_and_time_spent_details
+    type: one_to_many
+    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", "")
+  - id: nps_form_responses_nov_and_dec_2025
+    type: one_to_one
+    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", "")
+  - id: academy_nps_form_responses
+    type: one_to_many
+    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", "")
+  - id: all_users_question_wise_responses_summary_details_for_question_set_units
+    type: one_to_many
+    join_sql: ${user_id} = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
+  - id: all_users_question_attempt_details_for_question_set_units
+    type: one_to_many
+    join_sql: ${user_id} = ${all_users_question_attempt_details_for_question_set_units.user_id}
+  - id: all_users_bot_raw_conversation_details
+    type: one_to_many
+    join_sql: ${user_id} = ${all_users_bot_raw_conversation_details.user_id}
+ 
+
+</user_query>

@@ -1,0 +1,168 @@
+id: y_academy_users_placements_details
+type: model
+description: >-
+  Contains academy placement records for NxtWave users, capturing complete
+  details about job offers, internships, and hiring outcomes. Includes user
+  identifiers, enrollment product/program, placement references, job details,
+  company information, role and compensation, geographic location,
+  joining/completion dates, and placement channels. Also tracks
+  internship-specific data such as stipend, duration, full-time conversion
+  status, and internship progress. Primary source for placement performance,
+  hiring trends, compensation benchmarks, and overall career outcomes.
+base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`y_academy_users_placements_details`"
+measures:
+  - id: count_of_records
+    func: count
+    description: Total number of placement records
+  - id: unique_placed_users
+    func: count_distinct
+    of: user_id
+    description: Count of unique users with placement records
+  - id: avg_ctc_in_lpa
+    func: avg
+    of: ctc_in_lpa
+    description: Average CTC (Cost to Company) in Lakhs Per Annum across placements
+  - id: max_ctc_in_lpa
+    func: max
+    of: ctc_in_lpa
+    description: Maximum CTC offered across placements
+  - id: min_ctc_in_lpa
+    func: min
+    of: ctc_in_lpa
+    description: Minimum CTC offered across placements
+  - id: median_ctc_in_lpa
+    func: median
+    of: ctc_in_lpa
+    description: Median CTC offered across placements
+dimensions:
+  - id: reference_id
+    type: string
+    unique: true
+    description: Primary key of the dataset. Each reference_id uniquely identifies a single placement record. A single user may have multiple reference_ids, each representing a distinct placement event.
+  - id: user_id
+    type: string
+    description: Unique identifier assigned to each user. Acts as the foreign key linking to user-level data.
+  - id: user_product
+    type: string
+    description: The enrollment plan/program associated with the user at the time of placement (e.g., CCBP_ACADEMY_SMART, CCBP_ACADEMY_GENIUS, CCBP_ACADEMY_EDGE, etc.).
+  - id: job_id
+    type: string
+    description: Unique identifier for the job opportunity linked to the placement. NULL for MEGA_OFFLINE_DRIVE placements, EXTERNAL placements, and some historical records before 2024-03-01.
+  - id: date_of_placement
+    type: date
+    description: Date on which the placement is deemed successful. Derived primarily from offer_letter_confirmation_date with fallback to date_of_entry.
+  - id: placed_through
+    type: string
+    description: >-
+      Indicates the source or channel through which the placement was made. Exact enum values -
+        • NXTWAVE_PARTNER  (sourced by NxtWave)
+        • EXTERNAL         (secured independently by user)
+  - id: company_name
+    type: string
+    description: Name of the company where the user is placed. NULL when placed_through is EXTERNAL and user has not provided company details.
+  - id: company_type
+    type: string
+    description: Category/type of the hiring company (e.g., MNC, Startup, SME). NULL when placed_through is EXTERNAL and user has not provided company details.
+  - id: job_role
+    type: string
+    description: Role or designation offered to the user (e.g., Software Development, Data Science, Business Analyst). NULL when placed_through is EXTERNAL and user has not provided details.
+  - id: offer_letter_status
+    type: string
+    description: >-
+      Current status of the offer letter. Exact enum values -
+        • OFFER_LETTER_ACCEPTED
+        • OFFER_LETTER_REJECTED
+        • OFFER_LETTER_NOT_RELEASED
+        • OFFER_LETTER_YET_TO_BE_RELEASED
+  - id: placement_type
+    type: string
+    description: >-
+      Nature of the placement engagement. Exact enum values -
+        • INTERN_CUM_FULL_TIME  (internship with full-time conversion opportunity)
+        • FULL_TIME             (direct full-time employment)
+        • INTERN                (internship only)
+  - id: job_location
+    type: string
+    description: Geographic location (city/state) where the job is based. NULL for EXTERNAL placements without details and some historical NIAT records.
+  - id: job_field
+    type: string
+    description: >-
+      Domain classification of the job. Exact enum values -
+        • IT      (Information Technology roles)
+        • NON_IT  (Non-technology roles)
+  - id: date_of_joining
+    type: string
+    description: Date the user joined or is expected to join the company. Optional field populated only when obtainable by the placement team.
+  - id: date_of_completion
+    type: string
+    description: Applicable for internships only. Date the internship was or is expected to be completed. Optional field populated only when obtainable.
+  - id: ctc_in_lpa
+    type: number
+    description: Cost to Company for full-time roles, expressed in Lakhs Per Annum (LPA). NULL for internship-only placements (placement_type = INTERN).
+  - id: internship_stipend
+    type: string
+    description: Stipend amount provided during the internship period. NULL for FULL_TIME placements with no internship component.
+  - id: internship_duration
+    type: string
+    description: Total duration of the internship in months. NULL for FULL_TIME placements and some historical records.
+  - id: converted_to_full_time
+    type: string
+    description: >-
+      Indicates whether the internship has been or is expected to be converted to a full-time role. Optional field populated only when obtainable. Exact enum values -
+        • Yes
+        • No
+  - id: internship_status
+    type: string
+    description: >-
+      Tracks the current progress or outcome of the internship. Optional field. Exact enum values -
+        • COMPLETED
+        • IN_PROGRESS
+        • YET_TO_START
+        • DISCONTINUED
+        • NOT_JOINED
+        • TERMINATED_IN_BETWEEN
+  - id: is_nxtwave_placement
+    type: boolean
+    expr_sql: ${placed_through} = 'NXTWAVE_PARTNER'
+    description: TRUE if the placement was sourced through NxtWave, FALSE if secured externally by the user.
+    visibility: "internal"
+  - id: is_full_time
+    type: boolean
+    expr_sql: ${placement_type} IN ('FULL_TIME', 'INTERN_CUM_FULL_TIME')
+    description: TRUE if the placement includes a full-time component (FULL_TIME or INTERN_CUM_FULL_TIME).
+    visibility: "internal"
+  - id: placement_month
+    type: date
+    expr_sql: DATE_TRUNC(${date_of_placement}, MONTH)
+    description: Month of placement, truncated to the first day of the month. Useful for monthly trend analysis.
+relations:
+  - id: z_ccbp_academy_users_master_data
+    type: many_to_one
+    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+  - id: academy_user_profile_basic_details
+    type: many_to_one
+    join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
+  - id: academy_user_profile_education_details
+    type: many_to_one
+    join_sql: ${user_id} = ${academy_user_profile_education_details.user_id}
+  - id: y_academy_user_daily_engagement_time_spent
+    type: one_to_many
+    join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id}
+  - id: z_academy_users_npc_master_table
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_npc_master_table.user_id}
+  - id: z_academy_users_course_wise_completion_details
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id}
+  - id: z_academy_users_live_classes_attendance_and_time_spent_details
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}
+  - id: academy_nps_form_responses
+    type: one_to_many
+    join_sql: ${user_id} = ${academy_nps_form_responses.user_id}
+  - id: nps_form_responses_nov_and_dec_2025
+    type: many_to_one
+    join_sql: ${user_id} = ${nps_form_responses_nov_and_dec_2025.user_id}
+  - id: z_academy_users_topin_tech_assessments
+    type: one_to_many
+    join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments.user_id}

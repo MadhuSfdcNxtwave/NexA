@@ -2,7 +2,10 @@
 *.json
 !frontend/package.json
 !package-lock.json
+!backend/ccbp-academy-daily-reports-key.json.example
+!backend/gcp-sa-config.json.example
 *-key.json
+gcp-sa-config.json
 .env
 .env.*
 !.env.example
@@ -17,3 +20,13 @@ venv/
 # Node
 node_modules/
 dist/
+
+# Logs
+*.log
+
+# Local scratch / debug helpers (not part of the app)
+backend/_*.py
+backend/_*.txt
+debug-*.log
+.claude/
+.vscode/

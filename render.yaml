@@ -28,18 +28,41 @@ services:
         sync: false                # prompted at deploy
       - key: BQ_LOCATION
         value: US
+      - key: BQ_DEFAULT_DATASET
+        sync: false                # optional: warehouse dataset to focus on
       - key: VERTEX_LOCATION
         value: us-central1
       - key: GCP_SA_KEY_JSON
         sync: false                # paste the whole service-account JSON
+      # --- Models (Gemini via Vertex uses the service account — no extra key) ---
       - key: FETCH_PROVIDER
-        value: vertex
+        value: gemini
       - key: FETCH_MODEL
         value: gemini-2.5-flash
+      - key: VIZ_PROVIDER
+        value: gemini
       - key: VIZ_MODEL
         value: gemini-2.5-pro
+      # Optional alternative providers (only if you switch FETCH/VIZ_PROVIDER)
       - key: OPENAI_API_KEY
-        sync: false                # only needed if FETCH_PROVIDER=openai
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # --- Auth (first admin is bootstrapped from these on startup) ---
+      - key: JWT_SECRET
+        generateValue: true        # Render generates a strong random secret
+      - key: JWT_EXPIRE_MINUTES
+        value: "10080"
+      - key: ADMIN_EMAIL
+        sync: false                # your admin login email
+      - key: ADMIN_PASSWORD
+        sync: false                # your admin login password
+      - key: DEFAULT_USER_CREDITS
+        value: "100"
+      - key: CREDITS_PER_GB
+        value: "1"
       - key: CORS_ORIGINS
         sync: false                # set to the web URL after first deploy
 
