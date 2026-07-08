@@ -23,6 +23,7 @@ dist/
 
 # Logs
 *.log
+render-paste.env
 
 # Local scratch / debug helpers (not part of the app)
 backend/_*.py

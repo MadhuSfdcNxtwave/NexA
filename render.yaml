@@ -68,7 +68,7 @@ services:
 
   # ---- Frontend (static React build) ----
   - type: web
-    name: nexa-web
+    name: nexa
     runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
