@@ -188,6 +188,8 @@ export const api = {
   listWorkspaceTables: () => req("/workspace/tables"),
   addWorkspaceTable: (full_table_id) =>
     req("/workspace/tables", { method: "POST", body: { full_table_id } }),
+  bulkAddWorkspaceTables: (dataset) =>
+    req("/workspace/tables/bulk-add", { method: "POST", body: { dataset } }),
   updateWorkspaceTable: (tableId, patch) =>
     req(`/workspace/tables/${tableId}`, { method: "PATCH", body: patch }),
   removeWorkspaceTable: (tableId) =>

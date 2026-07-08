@@ -2936,6 +2936,26 @@ button.full-width { width: 100%; justify-content: center; }
 
 .mini-add:hover { background: var(--purple); color: #fff; }
 
+.dataset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dataset-row .data-object-item.dataset {
+  flex: 1;
+  min-width: 0;
+}
+
+.dataset-add-all {
+  width: auto;
+  height: auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .warehouse-hint { padding: 12px 14px; font-size: 12px; line-height: 1.5; }
 
 .error.warn {

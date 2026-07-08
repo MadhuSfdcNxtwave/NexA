@@ -175,6 +175,16 @@ def _latest_thread_entry(entries: list[dict[str, Any]]) -> dict[str, Any] | None
     return thread[-1] if thread else usable[-1]
 
 
+def _latest_thread_sql_entry(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Most recent thread turn with SQL — for follow-up routing even if rows were empty."""
+    thread = [
+        e
+        for e in (entries or [])
+        if e.get("source") == "thread" and (e.get("sql") or "").strip()
+    ]
+    return thread[-1] if thread else None
+
+
 def try_revisualize_from_prior(
     question: str,
     entries: list[dict[str, Any]],

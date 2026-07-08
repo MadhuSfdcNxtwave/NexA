@@ -31,6 +31,10 @@ _DEFAULT_WS_TABLES = ",".join([
     f"{_DATASET}.z_ccbp_users_cloudwatch_interactions_with_nav_bar",
 ])
 DEFAULT_WORKSPACE_TABLES = os.environ.get("DEFAULT_WORKSPACE_TABLES", _DEFAULT_WS_TABLES).strip()
+# On startup, add every BigQuery table in BQ_DEFAULT_DATASET that is not yet in the catalog.
+SYNC_WORKSPACE_FROM_DATASET = os.environ.get(
+    "SYNC_WORKSPACE_FROM_DATASET", "1"
+).strip().lower() in ("1", "true", "yes")
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")  # Vertex region
 MAX_BYTES_BILLED = int(os.environ.get("MAX_BYTES_BILLED", 2 * 1024**3))  # 2 GB cap/query (Ask)
 # Row preview on large views can scan many GB even with LIMIT; default 15 GB.

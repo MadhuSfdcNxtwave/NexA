@@ -574,6 +574,12 @@ def get_standalone_thread(
     user: User = Depends(get_current_user),
 ):
     t = _get_user_thread(db, thread_id, user)
+    if not (t.overview_kb or "").strip():
+        from thread_kb import refresh_thread_overview
+
+        refresh_thread_overview(db, t.id)
+        db.commit()
+        db.refresh(t)
     return _thread_out(db, t)
 
 
@@ -652,15 +658,31 @@ def _thread_context_for_ask(
     question: str = "",
 ) -> str:
     from project_context import build_sql_context
-    from question_intent import detect_intent
+    from question_intent import detect_intent, question_is_breakdown_followup, question_wants_breakdown
     from result_cache import _FOLLOWUP, _REF_PRIOR
+    from thread_kb import get_thread_overview
 
-    summary = notebook_api.build_thread_summary_from_memories(db, None, thread_id)
+    latest = db.scalar(
+        select(Memory)
+        .where(Memory.thread_id == thread_id)
+        .order_by(Memory.created_at.desc(), Memory.id.desc())
+        .limit(1)
+    )
+    prior_sql = (latest.sql or "").strip() if latest else ""
+    prior_q = (latest.question or "").strip() if latest else ""
+
+    overview = get_thread_overview(db, thread_id)
+    summary = overview or notebook_api.build_thread_summary_from_memories(db, None, thread_id)
     has_history = bool(
         db.scalar(select(Memory.id).where(Memory.thread_id == thread_id).limit(1))
     )
     q = (question or "").strip()
-    references_prior = bool(_REF_PRIOR.search(q) or _FOLLOWUP.search(q))
+    references_prior = bool(
+        _REF_PRIOR.search(q)
+        or _FOLLOWUP.search(q)
+        or question_is_breakdown_followup(q, prior_question=prior_q, prior_sql=prior_sql)
+        or (question_wants_breakdown(q) and has_history and prior_sql)
+    )
     compact = bool(
         summary
         and has_history
@@ -668,7 +690,7 @@ def _thread_context_for_ask(
         and len(q.split()) <= 24
         and not references_prior
     )
-    limit = 2 if compact else config.MEMORY_CONTEXT_SIZE
+    limit = 4 if references_prior else (2 if compact else config.MEMORY_CONTEXT_SIZE)
     rows = db.scalars(
         select(Memory)
         .where(Memory.thread_id == thread_id)
@@ -988,6 +1010,7 @@ def _thread_out(db: Session, t: Thread, creators: dict[int, str] | None = None) 
         title=t.title or "New thread",
         creator=creator,
         turn_count=int(count),
+        overview_kb=(t.overview_kb or "").strip(),
         created_at=_iso(t.created_at),
         updated_at=_iso(t.updated_at),
     )
@@ -1311,6 +1334,47 @@ def add_workspace_table(
     except Exception as e:
         print(f"[vector-index] failed {t.full_table_id}: {e}")
     return _project_table_out(t)
+
+
+@app.post("/workspace/tables/bulk-add", response_model=schemas.BulkAddOut)
+def bulk_add_workspace_tables(
+    body: schemas.BulkAddDatasetRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Add every table in a dataset to the workspace catalog in one shot.
+
+    Rows are created immediately; AI profiling + embeddings run in the
+    background so the request returns fast even for large datasets.
+    """
+    import threading
+
+    dataset = (body.dataset or "").strip()
+    if not dataset or dataset.count(".") < 1:
+        raise HTTPException(400, "dataset must be in the form project.dataset_id")
+    try:
+        tables = bq.list_tables_in_dataset(dataset)
+    except Exception as e:
+        raise HTTPException(502, f"Could not list tables in {dataset}: {e}")
+
+    existing = {t.full_table_id for t in db.scalars(select(WorkspaceTable)).all()}
+    added: list[str] = []
+    for tbl in tables:
+        fq = tbl.get("full_table_id")
+        if not fq or fq in existing:
+            continue
+        db.add(WorkspaceTable(full_table_id=fq, description="", included_for_ai=True))
+        added.append(fq)
+    if added:
+        db.commit()
+        threading.Thread(target=_backfill_ai_overviews, daemon=True).start()
+        threading.Thread(target=_backfill_table_embeddings, daemon=True).start()
+
+    return schemas.BulkAddOut(
+        added=added,
+        skipped=len(tables) - len(added),
+        total=len(tables),
+    )
 
 
 @app.post("/workspace/tables/{table_id}/ai-overview", response_model=schemas.TableOut)
@@ -2221,6 +2285,12 @@ def _save_ask_memory(
     else:
         db.add(Memory(project_id=project_id, thread_id=thread_id, **payload))
     _touch_thread(db, thread_id, result["question"])
+    try:
+        from thread_kb import refresh_thread_overview
+
+        refresh_thread_overview(db, thread_id)
+    except Exception:
+        pass
     db.commit()
     db.refresh(user)
     enrich_result_with_credits(result, used, remaining)

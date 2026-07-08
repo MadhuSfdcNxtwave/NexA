@@ -79,6 +79,34 @@ class ColumnMatch:
     selected: bool = False
 
 
+# Hex model YAML often ends descriptions with these blocks — keep them for SQL/answers.
+_GUIDANCE_SECTION_START = re.compile(
+    r"(?im)^\s*(?:"
+    r"Analytics Guidance|"
+    r"Recommended Metrics|"
+    r"Best Practices|"
+    r"Important considerations|"
+    r"IMPORTANT(?:\s+SCOPE)?(?:\s+NOTE)?|"
+    r"IMPORTANT\s*[—\-]|"
+    r"(?:Event\s+)?Grain(?:\s*&\s*uniqueness)?|"
+    r"Primary use cases"
+    r")\s*:?\s*$"
+)
+
+
+def split_table_description(description: str) -> tuple[str, str]:
+    """Split model description into summary vs analytics-guidance tail."""
+    text = (description or "").strip()
+    if not text:
+        return "", ""
+    m = _GUIDANCE_SECTION_START.search(text)
+    if not m:
+        return text, ""
+    summary = text[: m.start()].strip()
+    guidance = text[m.start() :].strip()
+    return summary, guidance
+
+
 @dataclass
 class TableKnowledge:
     full_table_id: str
@@ -87,6 +115,7 @@ class TableKnowledge:
     column_descriptions: dict[str, str]
     column_types: dict[str, str]
     ai_overview: str = ""
+    operational_guidance: str = ""
     endorsed: bool = False
     included_for_ai: bool = True
 
@@ -133,6 +162,8 @@ def load_table_knowledge(table: Any) -> TableKnowledge:
     if ws_table_desc and bq_table_desc and bq_table_desc not in ws_table_desc:
         table_description = f"{ws_table_desc} | {bq_table_desc}"
 
+    _, operational_guidance = split_table_description(table_description)
+
     return TableKnowledge(
         full_table_id=fq,
         short_name=_short_name(fq),
@@ -140,6 +171,7 @@ def load_table_knowledge(table: Any) -> TableKnowledge:
         column_descriptions=column_descriptions,
         column_types=column_types,
         ai_overview=(getattr(table, "ai_overview", "") or "").strip(),
+        operational_guidance=operational_guidance,
         endorsed=bool(getattr(table, "endorsed", False)),
         included_for_ai=bool(getattr(table, "included_for_ai", True)),
     )
@@ -214,6 +246,7 @@ def score_table_knowledge(
     """Score how well table + column descriptions match the question."""
     name = knowledge.short_name.lower()
     desc = knowledge.table_description.lower()
+    guidance = (knowledge.operational_guidance or "").lower()
     score = 0
 
     for kw in keywords:
@@ -221,6 +254,8 @@ def score_table_knowledge(
             score += 18 if kw not in _GENERIC_KW else 8
         if kw in desc:
             score += 10
+        if guidance and kw in guidance:
+            score += 6
         for col, col_desc in knowledge.column_descriptions.items():
             col_lower = col.lower()
             blob = f"{col_lower} {col_desc}".lower()
@@ -406,8 +441,21 @@ def build_knowledge_header(
         f"# Question: {question.strip()}",
     ]
     for k in knowledges:
-        if k.table_description:
-            lines.append(f"# TABLE {k.short_name}: {k.table_description[:400]}")
+        summary, guidance = split_table_description(k.table_description)
+        if summary:
+            lines.append(f"# TABLE {k.short_name}: {summary[:600]}")
+        elif k.table_description:
+            lines.append(f"# TABLE {k.short_name}: {k.table_description[:600]}")
+        guidance = guidance or (k.operational_guidance or "").strip()
+        if guidance:
+            lines.append(
+                f"# ANALYTICS GUIDANCE for `{k.short_name}` "
+                "(metrics, grain, best practices — follow for SQL and caveats in answers):"
+            )
+            for ln in guidance.splitlines():
+                ln = ln.strip()
+                if ln:
+                    lines.append(f"#   {ln[:240]}")
         if k.ai_overview:
             lines.append(f"# AI OVERVIEW for `{k.short_name}` (real data profile — trust this):")
             for ln in k.ai_overview.splitlines():

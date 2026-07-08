@@ -1205,6 +1205,50 @@ button.secondary {
   gap: 14px;
 }
 
+.analysis-feed {
+  gap: 18px;
+}
+
+.analysis-turn-block {
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 16px 18px 18px;
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.analysis-turn-block:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.analysis-turn-block.active {
+  border-color: rgba(99, 102, 241, 0.55);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.08);
+}
+
+.thread-overview-card {
+  padding: 12px 14px;
+  margin-bottom: 4px;
+}
+
+.thread-overview-card summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--brand-dark);
+}
+
+.thread-overview-body {
+  margin: 10px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+
 .results-header {
   display: flex;
   flex-direction: column;

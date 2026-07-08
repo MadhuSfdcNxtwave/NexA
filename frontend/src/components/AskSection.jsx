@@ -86,7 +86,7 @@ export default function AskSection({
   const [pendingQ, setPendingQ] = useState("");
   const [mobilePane, setMobilePane] = useState("results");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pinMsg, setPinMsg] = useState("");
+  const [threadOverview, setThreadOverview] = useState("");
   const chatEndRef = useRef(null);
   const pendingQuestionRef = useRef(initialQuestion?.trim() || null);
 
@@ -121,7 +121,18 @@ export default function AskSection({
   };
 
   const fetchMemory = () => {
-    if (isStandalone) return api.getThreadMemory(standaloneThreadId);
+    const tid = isStandalone ? standaloneThreadId : threadId;
+    if (tid) {
+      return api.getThreadMemory(tid).then((mem) => {
+        return api.getThread(tid)
+          .then((t) => {
+            setThreadOverview(t.overview_kb || "");
+            return mem;
+          })
+          .catch(() => mem);
+      });
+    }
+    setThreadOverview("");
     return api.getMemory(id, threadId);
   };
 
@@ -322,9 +333,19 @@ export default function AskSection({
       if (res) {
         appendTurn(text, res);
         setMobilePane("results");
-        if (!isStandalone) {
+        if (isStandalone) {
+          api.getThread(standaloneThreadId)
+            .then((t) => setThreadOverview(t.overview_kb || ""))
+            .catch(() => {});
+        } else {
           if (res.thread_id && res.thread_id !== threadIdRef.current) {
             setSearchParams({ thread: String(res.thread_id) }, { replace: true });
+          }
+          const tid = res.thread_id || threadIdRef.current;
+          if (tid) {
+            api.getThread(tid)
+              .then((t) => setThreadOverview(t.overview_kb || ""))
+              .catch(() => {});
           }
           reloadThreads();
         }
@@ -685,9 +706,15 @@ export default function AskSection({
             <span className="thread-pane-meta">Charts · tables · SQL</span>
           </header>
           <ThreadResultsPanel
+            turns={turns}
+            activeTurnIdx={activeTurnIdx}
+            onSelectTurn={(i) => {
+              setActiveTurnIdx(i);
+            }}
             turn={activeTurn}
             loading={resultsLoading || (loading && !!activeTurn)}
             askProgress={askProgress}
+            threadOverview={threadOverview}
             onPin={isStandalone ? undefined : pinToDashboard}
             pinDisabled={loading}
             onRerunSql={rerunSql}

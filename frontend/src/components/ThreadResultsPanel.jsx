@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Chart from "./Chart.jsx";
 import VizTable from "./VizTable.jsx";
 import UsageMeta from "./UsageMeta.jsx";
@@ -41,58 +41,39 @@ function defaultTab(turn) {
   return "sql";
 }
 
-/** Right pane — charts, tables, SQL for the selected turn. */
-export default function ThreadResultsPanel({
+function TurnResultCard({
   turn,
+  turnIndex,
+  isActive,
+  onSelect,
   loading,
   askProgress,
   onPin,
   pinDisabled,
   onRerunSql,
   rerunDisabled,
+  cardRef,
 }) {
   const [activeTab, setActiveTab] = useState(null);
   const [editSql, setEditSql] = useState(false);
   const [sqlDraft, setSqlDraft] = useState("");
 
-  const routingLine = turn
-    ? [
-        turn.routing_reason,
-        turn.selected_tables?.length
-          ? `Tables: ${turn.selected_tables.map((t) => `\`${t}\``).join(", ")}`
-          : "",
-        turn.probe_stats,
-        turn.sql_source ? `SQL: ${turn.sql_source}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : "";
+  const routingLine = [
+    turn.routing_reason,
+    turn.selected_tables?.length
+      ? `Tables: ${turn.selected_tables.map((t) => `\`${t}\``).join(", ")}`
+      : "",
+    turn.probe_stats,
+    turn.sql_source ? `SQL: ${turn.sql_source}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
-  const tab = activeTab || (turn ? defaultTab(turn) : "sql");
-
-  if (loading && !turn) {
-    return (
-      <div className="results-panel-inner">
-        {askProgress ? (
-          <AskProgress progress={askProgress} active />
-        ) : (
-          <ResultsSkeleton />
-        )}
-      </div>
-    );
-  }
-
-  if (!turn) {
-    return (
-      <div className="results-panel-inner">
-        <ResultsEmpty />
-      </div>
-    );
-  }
-
+  const tab = activeTab || defaultTab(turn);
   const hasChart = turn.chart_spec?.chart && turn.chart_spec.chart !== "none";
   const hasTable = turn.rows?.length > 0 && turn.columns?.length > 0;
   const showSqlEditor = editSql || tab === "sql";
+  const showProgress = loading && isActive && askProgress;
 
   const openSqlEdit = () => {
     setSqlDraft(turn.sql || "");
@@ -101,9 +82,13 @@ export default function ThreadResultsPanel({
   };
 
   return (
-    <div className="results-panel-inner">
+    <article
+      ref={cardRef}
+      className={`analysis-turn-block ${isActive ? "active" : ""}`}
+      onClick={() => onSelect?.(turnIndex)}
+    >
       <header className="results-header">
-        <span className="results-header-label">Answer</span>
+        <span className="results-header-label">Turn {turnIndex + 1}</span>
         <h2 className="results-question">{turn.question}</h2>
         {typeof turn.worked_seconds === "number" && turn.worked_seconds > 0 && (
           <p className="results-worked muted">
@@ -120,15 +105,13 @@ export default function ThreadResultsPanel({
         />
       </header>
 
-      {routingLine && (
-        <p className="results-routing muted">{routingLine}</p>
-      )}
+      {routingLine && <p className="results-routing muted">{routingLine}</p>}
 
       <div className="results-analysis glass-card">
         <p>{turn.analysis}</p>
       </div>
 
-      {loading && askProgress && (
+      {showProgress && (
         <div className="results-loading-overlay">
           <AskProgress progress={askProgress} active />
         </div>
@@ -141,7 +124,7 @@ export default function ThreadResultsPanel({
             role="tab"
             className={tab === "chart" ? "active" : ""}
             aria-selected={tab === "chart"}
-            onClick={() => { setActiveTab("chart"); setEditSql(false); }}
+            onClick={(e) => { e.stopPropagation(); setActiveTab("chart"); setEditSql(false); }}
           >
             Chart
           </button>
@@ -152,7 +135,7 @@ export default function ThreadResultsPanel({
             role="tab"
             className={tab === "table" ? "active" : ""}
             aria-selected={tab === "table"}
-            onClick={() => { setActiveTab("table"); setEditSql(false); }}
+            onClick={(e) => { e.stopPropagation(); setActiveTab("table"); setEditSql(false); }}
           >
             Table
           </button>
@@ -163,7 +146,7 @@ export default function ThreadResultsPanel({
             role="tab"
             className={tab === "sql" ? "active" : ""}
             aria-selected={tab === "sql"}
-            onClick={() => { setActiveTab("sql"); setEditSql(false); }}
+            onClick={(e) => { e.stopPropagation(); setActiveTab("sql"); setEditSql(false); }}
           >
             SQL
           </button>
@@ -190,6 +173,7 @@ export default function ThreadResultsPanel({
                 className="sql-edit-area"
                 value={sqlDraft || turn.sql}
                 onChange={(e) => setSqlDraft(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
                 rows={12}
                 spellCheck={false}
               />
@@ -198,11 +182,14 @@ export default function ThreadResultsPanel({
                   type="button"
                   className="primary"
                   disabled={rerunDisabled}
-                  onClick={() => onRerunSql(turn.question, sqlDraft || turn.sql)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRerunSql(turn.question, sqlDraft || turn.sql);
+                  }}
                 >
                   Run edited SQL
                 </button>
-                <button type="button" className="ghost" onClick={() => setEditSql(false)}>
+                <button type="button" className="ghost" onClick={(e) => { e.stopPropagation(); setEditSql(false); }}>
                   Cancel
                 </button>
               </div>
@@ -220,7 +207,7 @@ export default function ThreadResultsPanel({
                 <pre className="code-block">{turn.sql}</pre>
               )}
               {onRerunSql && (
-                <button type="button" className="ghost sql-edit-btn" onClick={openSqlEdit}>
+                <button type="button" className="ghost sql-edit-btn" onClick={(e) => { e.stopPropagation(); openSqlEdit(); }}>
                   Edit SQL &amp; re-run
                 </button>
               )}
@@ -233,12 +220,84 @@ export default function ThreadResultsPanel({
         <button
           type="button"
           className="primary results-pin-btn"
-          onClick={() => onPin(turn)}
+          onClick={(e) => { e.stopPropagation(); onPin(turn); }}
           disabled={pinDisabled}
         >
           Add to dashboard
         </button>
       )}
+    </article>
+  );
+}
+
+/** Analysis pane — scrollable feed of all thread answers. */
+export default function ThreadResultsPanel({
+  turns = [],
+  activeTurnIdx = -1,
+  onSelectTurn,
+  turn,
+  loading,
+  askProgress,
+  threadOverview = "",
+  onPin,
+  pinDisabled,
+  onRerunSql,
+  rerunDisabled,
+}) {
+  const feedRef = useRef(null);
+  const turnRefs = useRef([]);
+  const list = turns?.length ? turns : turn ? [turn] : [];
+  const activeIdx = turns?.length
+    ? (activeTurnIdx >= 0 && activeTurnIdx < turns.length ? activeTurnIdx : turns.length - 1)
+    : 0;
+
+  useEffect(() => {
+    const el = turnRefs.current[activeIdx];
+    if (el?.scrollIntoView) {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [activeIdx, list.length, loading]);
+
+  if (loading && !list.length) {
+    return (
+      <div className="results-panel-inner">
+        {askProgress ? <AskProgress progress={askProgress} active /> : <ResultsSkeleton />}
+      </div>
+    );
+  }
+
+  if (!list.length) {
+    return (
+      <div className="results-panel-inner">
+        <ResultsEmpty />
+      </div>
+    );
+  }
+
+  return (
+    <div className="results-panel-inner analysis-feed" ref={feedRef}>
+      {threadOverview && (
+        <details className="thread-overview-card glass-card">
+          <summary>Thread memory</summary>
+          <pre className="thread-overview-body">{threadOverview}</pre>
+        </details>
+      )}
+      {list.map((t, i) => (
+        <TurnResultCard
+          key={`${i}-${t.question?.slice(0, 32)}`}
+          turn={t}
+          turnIndex={i}
+          isActive={i === activeIdx}
+          onSelect={onSelectTurn}
+          loading={loading}
+          askProgress={i === activeIdx ? askProgress : null}
+          onPin={onPin}
+          pinDisabled={pinDisabled}
+          onRerunSql={onRerunSql}
+          rerunDisabled={rerunDisabled}
+          cardRef={(el) => { turnRefs.current[i] = el; }}
+        />
+      ))}
     </div>
   );
 }
