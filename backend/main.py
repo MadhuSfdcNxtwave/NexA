@@ -501,7 +501,7 @@ def _user_names(db: Session, ids: set[int | None]) -> dict[int, str]:
 @app.get("/threads", response_model=list[schemas.ThreadListOut])
 def list_all_threads(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Hex-style global Threads list — standalone + optional project-linked."""
     threads = db.scalars(
