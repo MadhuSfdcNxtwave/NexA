@@ -121,6 +121,9 @@ def column_names(expr: exp.Expression) -> set[str]:
     return names
 
 
+_SUBQUERY_ITERATORS = frozenset({"x", "t", "v", "val", "row", "item", "elem"})
+
+
 def defined_aliases(expr: exp.Expression) -> set[str]:
     """Names defined INSIDE the query: CTE names and SELECT aliases.
 
@@ -200,7 +203,9 @@ def validate_against_schema(
         # itself (Hex-style CTE SQL renames long columns to short aliases).
         permitted.update(defined_aliases(expr))
 
-        unknown = sorted(c for c in idents if c not in permitted)
+        unknown = sorted(
+            c for c in idents if c not in permitted and c not in _SUBQUERY_ITERATORS
+        )
         if unknown:
             if len(referenced) == 1:
                 fq = next(iter(referenced))

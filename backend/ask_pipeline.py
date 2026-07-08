@@ -486,6 +486,45 @@ def _try_feedback_template_sql(
     return sql
 
 
+def _planner_tables_for_plan(
+    plan,
+    selected_tables: list,
+    pool: list,
+    columns_by_table: dict[str, set[str]],
+) -> tuple[list, dict[str, set[str]]]:
+    """Expand selected tables + column map for union member models (even if not in workspace)."""
+    from types import SimpleNamespace
+
+    from semantic_layer import semantic_by_model_id
+
+    planner_tables = list(selected_tables)
+    cols = dict(columns_by_table or {})
+    pool_fqs = {getattr(t, "full_table_id", "") for t in pool}
+    member_ids = list(getattr(plan, "union_member_ids", None) or [])
+    for mid in member_ids:
+        sem = semantic_by_model_id(mid)
+        if not sem or not sem.full_table_id:
+            continue
+        fq = sem.full_table_id
+        if fq not in cols:
+            cols[fq] = {d.id for d in sem.dimensions}
+        found = next((t for t in planner_tables if getattr(t, "full_table_id", "") == fq), None)
+        if found:
+            continue
+        if fq in pool_fqs:
+            planner_tables.append(next(t for t in pool if t.full_table_id == fq))
+        else:
+            planner_tables.append(
+                SimpleNamespace(
+                    full_table_id=fq,
+                    column_hints_json="{}",
+                    column_descriptions_json="{}",
+                    ai_profile_json="{}",
+                )
+            )
+    return planner_tables, cols
+
+
 def _try_planner_sql(
     question: str,
     selected_tables: list,
@@ -521,33 +560,27 @@ def _try_planner_sql(
     )
     if not raw:
         return None, plan.reason, None
+    planner_tables, planner_cols = _planner_tables_for_plan(
+        plan, selected_tables, pool, columns_by_table
+    )
     try:
         sql = bq.validate_select_only(raw)
     except ValueError:
         return None, plan.reason, None
     if not sql_matches_question_intent(question, sql, schema_entities=schema_entities):
         return None, plan.reason, None
+    planner_hints = _column_hints_map(planner_tables)
+    planner_inferred, _ = _infer_hints_for_tables(planner_tables)
     violations = validate_sql(
         sql,
         question,
-        selected_tables,
-        hints_map,
-        inferred,
-        columns_by_table=columns_by_table,
+        planner_tables,
+        planner_hints,
+        planner_inferred,
+        columns_by_table=planner_cols,
     )
     if violations:
         return None, plan.reason, None
-    planner_tables = list(selected_tables)
-    if plan.union_member_ids:
-        from semantic_layer import semantic_by_model_id
-
-        for mid in plan.union_member_ids:
-            sem = semantic_by_model_id(mid)
-            if not sem or not sem.full_table_id:
-                continue
-            for t in pool:
-                if t.full_table_id == sem.full_table_id and t not in planner_tables:
-                    planner_tables.append(t)
     return sql, plan.reason, planner_tables or None
 
 

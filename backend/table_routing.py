@@ -257,6 +257,13 @@ def validate_sql_table_choice(question: str, sql: str) -> tuple[bool, str]:
     sql_l = (sql or "").lower()
     if not sql_l.strip():
         return False, "empty SQL"
+    # NPS topic search unions ongoing + legacy snapshot — not a single-table pin violation.
+    if rule.id == "nps_form_responses" and " union all " in sql_l:
+        if rule.table_short.lower() in sql_l or "nps_form_responses" in sql_l:
+            for bad in rule.score_penalty_shorts:
+                if bad in sql_l:
+                    return False, f"wrong table fragment `{bad}`"
+            return True, ""
     if rule.table_short.lower() not in sql_l:
         return False, f"expected table `{rule.table_short}`"
     for bad in rule.score_penalty_shorts:

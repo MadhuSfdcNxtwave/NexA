@@ -29,14 +29,23 @@ def _nps_tables() -> list[SimpleNamespace]:
         SimpleNamespace(
             full_table_id=f"{DATASET}.academy_nps_form_responses",
             included_for_ai=True,
+            column_hints_json="{}",
+            column_descriptions_json="{}",
+            ai_profile_json="{}",
         ),
         SimpleNamespace(
             full_table_id=f"{DATASET}.nps_form_responses_nov_and_dec_2025",
             included_for_ai=True,
+            column_hints_json="{}",
+            column_descriptions_json="{}",
+            ai_profile_json="{}",
         ),
         SimpleNamespace(
             full_table_id=f"{DATASET}.users_contextual_feedback_details",
             included_for_ai=True,
+            column_hints_json="{}",
+            column_descriptions_json="{}",
+            ai_profile_json="{}",
         ),
     ]
 
@@ -124,6 +133,24 @@ class QueryPlannerTests(unittest.TestCase):
         tables = _nps_tables()
         plan = try_build_measure_plan(NPS_Q, tables, catalog_tables=tables)
         self.assertIsNone(plan)
+
+    def test_planner_sql_passes_validation_with_one_workspace_table(self) -> None:
+        from ask_pipeline import _column_hints_map, _infer_hints_for_tables, _try_planner_sql
+
+        tables = [_nps_tables()[0]]
+        pool = _nps_tables()
+        cols = _nps_columns()
+        inferred, _ = _infer_hints_for_tables(tables)
+        hints = _column_hints_map(tables)
+        sql, reason, picked = _try_planner_sql(
+            NPS_Q, tables, hints, inferred, cols, catalog_tables=pool
+        )
+        self.assertIsNotNone(sql, msg=reason)
+        assert sql is not None
+        self.assertIn("UNION ALL", sql)
+        self.assertIn("nps_form_responses_nov_and_dec_2025", sql)
+        shorts = {t.full_table_id.rsplit(".", 1)[-1] for t in (picked or [])}
+        self.assertIn("nps_form_responses_nov_and_dec_2025", shorts)
 
 
 if __name__ == "__main__":
