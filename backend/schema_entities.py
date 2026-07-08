@@ -147,11 +147,13 @@ def primary_matched_entity(
         return matched[0]
     if not _COUNT_Q.search(q):
         return None
+    # «How many users/students» → COUNT(DISTINCT user_id); don't force a job/NPS dimension.
+    if re.search(r"\b(user|users|student|students|learner)\b", q, re.I):
+        return None
     # Prefer non-user entities when question doesn't say user/student.
-    if not re.search(r"\b(user|users|student|students|learner)\b", q, re.I):
-        for ent in matched:
-            if "user" not in ent.label and not any(c.lower() in _ID_COLS for c in ent.columns):
-                return ent
+    for ent in matched:
+        if "user" not in ent.label and not any(c.lower() in _ID_COLS for c in ent.columns):
+            return ent
     return matched[0]
 
 
@@ -197,13 +199,18 @@ def validate_sql_for_question(
     if not sql_text:
         return False, "empty SQL"
 
+    q_users = bool(re.search(r"\b(user|users|student|students|learner)\b", q, re.I))
+    sql_counts_users = bool(re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I))
+
     primary = primary_matched_entity(q, entities)
     if primary and _COUNT_Q.search(q) and not question_wants_breakdown(q):
-        if re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I):
-            if not re.search(r"\b(user|users|student|students)\b", q, re.I):
-                return False, f"question asks about {primary.label}, not user count"
-        if not _entity_in_sql(sql_text, primary):
-            return False, f"SQL must use column for {primary.label}"
+        if sql_counts_users and not q_users:
+            return False, f"question asks about {primary.label}, not user count"
+        if sql_counts_users and q_users:
+            pass  # COUNT(DISTINCT user_id) is correct for user questions
+        elif not _entity_in_sql(sql_text, primary):
+            col = primary.columns[0] if primary.columns else primary.label
+            return False, f"SQL must use column for {primary.label} (e.g. `{col}`)"
 
     if question_wants_breakdown(q) and not re.search(r"\bGROUP BY\b", sql_text, re.I):
         return False, "breakdown question requires GROUP BY"

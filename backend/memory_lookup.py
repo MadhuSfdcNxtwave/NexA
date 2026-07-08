@@ -63,6 +63,50 @@ def normalize_question(question: str) -> str:
     return q.rstrip("?.!").strip()
 
 
+def sql_intent_mismatch_reason(
+    question: str,
+    sql: str,
+    *,
+    schema_entities: list | None = None,
+) -> str | None:
+    """None when SQL shape plausibly answers the question; else a short reason."""
+    q = expand_question_abbreviations((question or "").strip())
+    sql_text = (sql or "").strip()
+    if not q or not sql_text:
+        return "empty question or SQL"
+
+    if schema_entities:
+        ok, reason = validate_sql_for_question(q, sql_text, schema_entities)
+        if not ok:
+            return reason
+
+    if question_asks_growth_cycle_count(q):
+        if re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I):
+            return "growth cycle count must not use COUNT(DISTINCT user_id)"
+        if not re.search(r"growth_cycle", sql_text, re.I):
+            return "growth cycle question must reference growth_cycle column"
+
+    if question_wants_breakdown(q) and not re.search(r"\bGROUP BY\b", sql_text, re.I):
+        return "breakdown question requires GROUP BY"
+
+    if re.search(r"COUNT\s*\(\s*DISTINCT\s+['\"]", sql_text, re.I):
+        return "COUNT(DISTINCT 'literal') is invalid"
+
+    for q_pat, sql_or_col_pat in _DIMENSION_IN_QUESTION:
+        if not q_pat.search(q):
+            continue
+        if not sql_or_col_pat.search(sql_text):
+            return "SQL missing dimension column referenced in the question"
+
+    if re.search(r"\bnps\b", q, re.I) and not re.search(r"\baverage|avg\b", q, re.I):
+        if re.search(r"\bAVG\s*\(", sql_text, re.I) and not re.search(
+            r"COUNTIF|promoter|detractor|nps_score", sql_text, re.I
+        ):
+            return "NPS score questions need COUNTIF/promoter logic, not AVG alone"
+
+    return None
+
+
 def sql_matches_question_intent(
     question: str,
     sql: str,
@@ -70,43 +114,7 @@ def sql_matches_question_intent(
     schema_entities: list | None = None,
 ) -> bool:
     """True when SQL shape plausibly answers the question (pre- or post-execution)."""
-    q = expand_question_abbreviations((question or "").strip())
-    sql_text = (sql or "").strip()
-    if not q or not sql_text:
-        return False
-
-    if schema_entities:
-        ok, _ = validate_sql_for_question(q, sql_text, schema_entities)
-        if not ok:
-            return False
-
-    if question_asks_growth_cycle_count(q):
-        if re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I):
-            return False
-        if not re.search(r"growth_cycle", sql_text, re.I):
-            return False
-
-    if question_wants_breakdown(q) and not re.search(r"\bGROUP BY\b", sql_text, re.I):
-        return False
-
-    # COUNT(DISTINCT 'literal') is always a broken query.
-    if re.search(r"COUNT\s*\(\s*DISTINCT\s+['\"]", sql_text, re.I):
-        return False
-
-    for q_pat, sql_or_col_pat in _DIMENSION_IN_QUESTION:
-        if not q_pat.search(q):
-            continue
-        if not sql_or_col_pat.search(sql_text):
-            return False
-
-    # NPS score questions must not be answered with AVG alone.
-    if re.search(r"\bnps\b", q, re.I) and not re.search(r"\baverage|avg\b", q, re.I):
-        if re.search(r"\bAVG\s*\(", sql_text, re.I) and not re.search(
-            r"COUNTIF|promoter|detractor|nps_score", sql_text, re.I
-        ):
-            return False
-
-    return True
+    return sql_intent_mismatch_reason(question, sql, schema_entities=schema_entities) is None
 
 
 def stored_answer_matches_question(

@@ -977,18 +977,14 @@ def _iter_validated_sql(
                 break
             continue
 
-        from memory_lookup import sql_matches_question_intent
+        from memory_lookup import sql_intent_mismatch_reason
 
-        if not sql_matches_question_intent(
+        intent_reason = sql_intent_mismatch_reason(
             question, sql, schema_entities=schema_entities
-        ):
+        )
+        if intent_reason:
             stale_rounds += 1
-            prior = (
-                "SQL does not match the question intent. "
-                "For breakdown/per/wise questions use GROUP BY on the dimension column. "
-                "For company counts use COUNT(DISTINCT organisation_id), not COUNT(*). "
-                "Regenerate the full query."
-            )
+            prior = f"SQL does not match the question intent: {intent_reason} Regenerate the full query."
             log_sql_verification(
                 audit,
                 question=question,
