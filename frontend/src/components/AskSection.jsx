@@ -18,7 +18,7 @@ import {
   matchesAskJob,
   subscribeAskJob,
 } from "../askStore.js";
-import { normalizeAskResult, memoryToTurn } from "../askResult.js";
+import { normalizeAskResult, memoryToTurn, mergeTurns } from "../askResult.js";
 
 function FollowUpSuggestions({ suggestions, onPick, disabled }) {
   if (!suggestions?.length) return null;
@@ -228,8 +228,11 @@ export default function AskSection({
       const mem = await fetchMemory();
       if (!scopeMatches()) return;
       const loaded = mem.map(memoryToTurn);
-      setTurns(loaded);
-      setActiveTurnIdx(loaded.length ? loaded.length - 1 : -1);
+      setTurns((prev) => {
+        const merged = mergeTurns(prev, loaded);
+        setActiveTurnIdx(merged.length ? merged.length - 1 : -1);
+        return merged;
+      });
     } catch (_) {
       /* appendTurn may have already updated local state */
     }
@@ -325,7 +328,7 @@ export default function AskSection({
           }
           reloadThreads();
         }
-        await syncTurnsFromMemory();
+        // Trust the stream result; memory reload can race before Postgres commit.
       } else if (!clarPayload && !approvalPayload) {
         setError("Ask finished without a result — try again with Fresh checked.");
       }
@@ -504,10 +507,14 @@ export default function AskSection({
     fetchMemory()
       .then((mem) => {
         if (cancelled || !scopeMatches()) return;
+        if (getAskJob()?.loading) return;
 
         const loaded = mem.map(memoryToTurn);
-        setTurns(loaded);
-        setActiveTurnIdx(loaded.length ? loaded.length - 1 : -1);
+        setTurns((prev) => {
+          const merged = mergeTurns(prev, loaded);
+          setActiveTurnIdx(merged.length ? merged.length - 1 : -1);
+          return merged;
+        });
         setMemLoading(false);
 
         const pending = pendingQuestionRef.current;
@@ -542,9 +549,12 @@ export default function AskSection({
         try {
           const mem = await fetchMemory();
           if (!scopeMatches()) return;
-          const loaded = mem.map(memoryToTurn);
-          setTurns(loaded);
-          setActiveTurnIdx(loaded.length ? loaded.length - 1 : -1);
+          setTurns((prev) => {
+            const loaded = mem.map(memoryToTurn);
+            const merged = mergeTurns(prev, loaded);
+            setActiveTurnIdx(merged.length ? merged.length - 1 : -1);
+            return merged;
+          });
         } catch (_) {
           /* keep local turns */
         }

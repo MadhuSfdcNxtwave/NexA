@@ -28,9 +28,10 @@ export function normalizeAskResult(res) {
 }
 
 export function memoryToTurn(m) {
+  const analysis = (m.summary ?? m.analysis ?? "").trim();
   return {
     question: m.question,
-    analysis: m.summary,
+    analysis: analysis || "See the chart, table, or SQL below for your answer.",
     sql: m.sql,
     chart_spec: m.chart_spec,
     rows: m.rows,
@@ -40,4 +41,47 @@ export function memoryToTurn(m) {
     from_cache: !!m.from_cache,
     fromMemory: true,
   };
+}
+
+/** Keep in-flight / just-finished local turns when memory reload is stale. */
+export function mergeTurns(localTurns, memoryTurns) {
+  const local = localTurns || [];
+  const memory = memoryTurns || [];
+  if (!local.length) return memory;
+  if (!memory.length) return local;
+
+  const byQuestion = new Map();
+  for (const turn of memory) {
+    byQuestion.set(turn.question.trim(), turn);
+  }
+  for (const turn of local) {
+    const key = turn.question.trim();
+    const existing = byQuestion.get(key);
+    if (!existing) {
+      byQuestion.set(key, turn);
+      continue;
+    }
+    const localRows = turn.rows?.length || 0;
+    const memRows = existing.rows?.length || 0;
+    const localAnalysis = (turn.analysis || "").length;
+    const memAnalysis = (existing.analysis || "").length;
+    if (localRows > memRows || localAnalysis > memAnalysis) {
+      byQuestion.set(key, turn);
+    }
+  }
+  const memoryOrder = memory.map((t) => t.question.trim());
+  const seen = new Set();
+  const merged = [];
+  for (const key of memoryOrder) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(byQuestion.get(key));
+  }
+  for (const turn of local) {
+    const key = turn.question.trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(turn);
+  }
+  return merged;
 }
