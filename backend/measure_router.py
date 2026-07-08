@@ -134,7 +134,12 @@ def _score_semantic_table(question: str, semantic: TableSemantic) -> int:
     if re.search(r"\bactive\b", q) and re.search(r"\bplatform\b", q):
         if "daily_engagement" in name or "time_spent" in name:
             score += 200
-    if re.search(r"\bfeedback\b|\bemoji\b", q) and "contextual_feedback" in name:
+    if re.search(r"\bnps\s+form|\bnps_form_responses", q):
+        if "nps" in name:
+            score += 400
+        if "contextual_feedback" in name:
+            score -= 400
+    elif re.search(r"\bfeedback\b|\bemoji\b", q) and "contextual_feedback" in name:
         score += 200
     if re.search(r"\bplacement\b|\bctc\b", q) and "placement" in name:
         score += 150
@@ -155,6 +160,12 @@ def try_build_measure_plan(
     catalog_tables: list[Any] | None = None,
 ) -> MeasurePlan | None:
     """Return a measure plan when the question maps to a defined semantic measure."""
+    from query_planner import classify_intent
+
+    intent = classify_intent(question)
+    if intent in ("topic_search", "survey_distribution"):
+        return None
+
     # Domain-pinned routing passes a single table — do not let catalog scan override it.
     if len(selected_tables) == 1:
         pool = list(selected_tables)

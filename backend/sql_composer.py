@@ -8,26 +8,34 @@ from question_dates import date_filter_sql, pick_date_column, resolve_relative_r
 from semantic_layer import semantic_for_table
 
 
-def _aggregate_sql(plan: MeasurePlan) -> str:
+def _aggregate_sql(plan: MeasurePlan, semantic=None) -> str:
     m = plan.measure
+    if m.func_sql:
+        return m.func_sql
+    if m.func == "custom" and m.func_sql:
+        return m.func_sql
     func = (m.func or "count").lower().replace(" ", "_")
     col = m.of_column
-    if func == "count_distinct" and col:
-        return f"COUNT(DISTINCT `{col}`)"
-    if func == "count" and col:
-        return f"COUNT(`{col}`)"
+    if semantic and col:
+        col_ref = semantic.dim_sql(col)
+    else:
+        col_ref = f"`{col}`" if col else ""
+    if func == "count_distinct" and col_ref:
+        return f"COUNT(DISTINCT {col_ref})"
+    if func == "count" and col_ref:
+        return f"COUNT({col_ref})"
     if func == "count":
         return "COUNT(*)"
-    if func in ("avg", "average") and col:
-        return f"AVG(`{col}`)"
-    if func == "max" and col:
-        return f"MAX(`{col}`)"
-    if func == "min" and col:
-        return f"MIN(`{col}`)"
-    if func == "median" and col:
-        return f"APPROX_QUANTILES(`{col}`, 2)[OFFSET(1)]"
-    if col:
-        return f"{func.upper()}(`{col}`)"
+    if func in ("avg", "average") and col_ref:
+        return f"AVG({col_ref})"
+    if func == "max" and col_ref:
+        return f"MAX({col_ref})"
+    if func == "min" and col_ref:
+        return f"MIN({col_ref})"
+    if func == "median" and col_ref:
+        return f"APPROX_QUANTILES({col_ref}, 2)[OFFSET(1)]"
+    if col_ref:
+        return f"{func.upper()}({col_ref})"
     return "COUNT(*)"
 
 
@@ -39,11 +47,19 @@ def _alias_for_measure(plan: MeasurePlan) -> str:
 
 def compose_sql(plan: MeasurePlan, question: str, table: object) -> str:
     """Build a read-only SELECT from a measure plan."""
+    sem = semantic_for_table(table)
     fq = plan.table_fq
-    agg = _aggregate_sql(plan)
+    agg = _aggregate_sql(plan, sem)
     alias = _alias_for_measure(plan)
 
     where_parts: list[str] = list(plan.filters)
+    if sem:
+        for m in sem.measures:
+            if m.id == plan.measure.id and m.filters:
+                for fid in m.filters:
+                    dim = sem.dimension_by_id(fid)
+                    if dim:
+                        where_parts.append(f"{sem.dim_sql(dim.id)} IS NOT NULL")
     rel = resolve_relative_range(question)
     if rel:
         date_col = pick_date_column(table)
