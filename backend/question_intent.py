@@ -140,6 +140,24 @@ def expand_breakdown_followup(
         dim = ""
 
     topic = prior_question.strip() or "the previous metric"
+    if prior_sql.strip():
+        try:
+            from ask_plan import _tables_from_prior_sql
+
+            # prior_sql may reference tables not in included; names still help the model.
+            refs = {
+                m.group(1).rsplit(".", 1)[-1]
+                for m in re.finditer(r"`([^`]+)`", prior_sql)
+            }
+            if refs:
+                parts_table = f"Use ONLY table(s): {', '.join(f'`{t}`' for t in sorted(refs))}."
+            else:
+                parts_table = ""
+        except Exception:
+            parts_table = ""
+    else:
+        parts_table = ""
+
     if dim:
         breakdown = f"by {dim}"
     else:
@@ -149,9 +167,13 @@ def expand_breakdown_followup(
         )
     parts = [
         f"Break down «{topic}» {breakdown}.",
+    ]
+    if parts_table:
+        parts.append(parts_table)
+    parts.extend([
         "Use the SAME table and WHERE filters as the prior query.",
         "Return GROUP BY with COUNT(DISTINCT user_id) per category.",
-    ]
+    ])
     if prior_sql.strip() and "pause_status" in prior_sql.lower():
         parts.append("Keep pause_status IS NULL if the prior query used active users.")
     return " ".join(parts)

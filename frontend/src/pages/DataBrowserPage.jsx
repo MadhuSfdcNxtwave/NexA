@@ -411,6 +411,8 @@ export default function DataBrowserPage() {
   }, [metadata, colSearch, projectTable]);
 
   const [warehouseLoaded, setWarehouseLoaded] = useState(false);
+  const [bulkAdding, setBulkAdding] = useState(null);
+  const [bulkMsg, setBulkMsg] = useState("");
 
   const loadSetupInfo = async () => {
     try {
@@ -572,6 +574,26 @@ export default function DataBrowserPage() {
       await selectTable(fq);
     } catch (e) {
       setError(e.message);
+    }
+  };
+
+  const addAllFromDataset = async (datasetFullId) => {
+    if (bulkAdding) return;
+    setBulkAdding(datasetFullId);
+    setError("");
+    try {
+      const res = await api.bulkAddWorkspaceTables(datasetFullId);
+      await loadData();
+      setBulkMsg(
+        res.added.length
+          ? `Added ${res.added.length} table${res.added.length === 1 ? "" : "s"} — profiling in the background.`
+          : "All tables in this dataset are already in the workspace.",
+      );
+      setTimeout(() => setBulkMsg(""), 5000);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBulkAdding(null);
     }
   };
 
@@ -874,13 +896,25 @@ export default function DataBrowserPage() {
             {canEdit && browserTab === "warehouse" && warehouseOk && !warehouseLoading && (
               <div className="data-object-section">
                 <div className="data-object-label">DATASETS ({datasets.length})</div>
+                {bulkMsg && <div className="data-object-empty muted warehouse-hint">{bulkMsg}</div>}
                 {visibleDatasets.map((ds) => (
                   <div key={ds.full_id}>
-                    <button className="data-object-item dataset" onClick={() => toggleDataset(ds.full_id)}>
-                      <span className="obj-chevron">{expandedDatasets.has(ds.full_id) ? "▾" : "▸"}</span>
-                      <span className="obj-icon schema">◫</span>
-                      <span className="obj-name">{ds.dataset_id}</span>
-                    </button>
+                    <div className="dataset-row">
+                      <button className="data-object-item dataset" onClick={() => toggleDataset(ds.full_id)}>
+                        <span className="obj-chevron">{expandedDatasets.has(ds.full_id) ? "▾" : "▸"}</span>
+                        <span className="obj-icon schema">◫</span>
+                        <span className="obj-name">{ds.dataset_id}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="mini-add dataset-add-all"
+                        title="Add every table in this dataset to the workspace"
+                        disabled={bulkAdding != null}
+                        onClick={(e) => { e.stopPropagation(); addAllFromDataset(ds.full_id); }}
+                      >
+                        {bulkAdding === ds.full_id ? "Adding…" : "+ Add all"}
+                      </button>
+                    </div>
                     {expandedDatasets.has(ds.full_id) && (
                       <div className="data-object-nested">
                         {(tablesByDataset[ds.full_id] || [])

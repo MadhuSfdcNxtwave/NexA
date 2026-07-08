@@ -525,7 +525,12 @@ def select_tables(question: str, catalog: list[dict]) -> dict:
     for t in catalog:
         lines.append(f"## {t['short_name']}  (full_table_id: {t['full_table_id']})")
         if t.get("description"):
-            lines.append(f"Description: {t['description'][:300]}")
+            lines.append(f"Description: {t['description'][:800]}")
+        if t.get("guidance"):
+            lines.append(
+                "Analytics guidance / recommended metrics / best practices:\n"
+                f"{t['guidance'][:2000]}"
+            )
         if t.get("profile"):
             lines.append(f"AI profile:\n{t['profile'][:1200]}")
         lines.append("")
@@ -837,7 +842,12 @@ def build_clarification_options(
         sel = " [SELECTED]" if t.get("selected") else ""
         lines.append(f"## {t['short_name']}{sel}")
         if t.get("description"):
-            lines.append(t["description"][:300])
+            lines.append(t["description"][:600])
+        if t.get("guidance"):
+            lines.append(
+                "Analytics guidance / recommended metrics / best practices:\n"
+                f"{t['guidance'][:1500]}"
+            )
         if t.get("profile"):
             lines.append(t["profile"][:900])
         lines.append("")

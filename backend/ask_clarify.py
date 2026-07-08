@@ -8,6 +8,7 @@ from typing import Any
 
 import config
 import join_graph as jg
+import knowledge_base as kb
 
 _AMBIGUOUS = re.compile(
     r"\b("
@@ -285,11 +286,13 @@ def build_clarification(
     table_names: set[str] = set()
     for k in knowledges:
         table_names.add(k.short_name.lower())
+        summary, guidance = kb.split_table_description(k.table_description or "")
         catalog.append(
             {
                 "full_table_id": k.full_table_id,
                 "short_name": k.short_name,
-                "description": (k.table_description or "")[:400],
+                "description": (summary or k.table_description or "")[:600],
+                "guidance": (guidance or k.operational_guidance or "")[:1500],
                 "profile": (k.ai_overview or "")[:1200],
                 "selected": k.full_table_id in selected_ids,
             }

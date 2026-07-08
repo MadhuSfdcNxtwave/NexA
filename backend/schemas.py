@@ -165,6 +165,16 @@ class TableCreate(BaseModel):
     full_table_id: str  # project.dataset.table
 
 
+class BulkAddDatasetRequest(BaseModel):
+    dataset: str  # project.dataset_id
+
+
+class BulkAddOut(BaseModel):
+    added: list[str] = []
+    skipped: int = 0
+    total: int = 0
+
+
 class TableOut(BaseModel):
     id: int
     full_table_id: str
@@ -303,6 +313,7 @@ class ThreadOut(BaseModel):
     title: str
     creator: str = ""
     turn_count: int = 0
+    overview_kb: str = ""
     created_at: str | None = None
     updated_at: str | None = None
 

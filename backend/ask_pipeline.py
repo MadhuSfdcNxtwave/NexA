@@ -1207,9 +1207,9 @@ def iter_ask(
 
     prior_entry = None
     if cache_entries:
-        from result_cache import _latest_thread_entry
+        from result_cache import _latest_thread_entry, _latest_thread_sql_entry
 
-        prior_entry = _latest_thread_entry(cache_entries)
+        prior_entry = _latest_thread_entry(cache_entries) or _latest_thread_sql_entry(cache_entries)
 
     prior_q = (prior_entry or {}).get("question") or ""
     prior_sql = (prior_entry or {}).get("sql") or ""

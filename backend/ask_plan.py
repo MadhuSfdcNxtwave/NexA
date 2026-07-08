@@ -87,11 +87,14 @@ def _llm_route_tables(question: str, project_tables: list[Any]) -> tuple[list[st
     catalog = []
     for t in project_tables:
         overview = (getattr(t, "ai_overview", "") or "").strip()
+        desc = (getattr(t, "description", "") or "").strip()
+        summary, guidance = kb.split_table_description(desc)
         catalog.append(
             {
                 "full_table_id": t.full_table_id,
                 "short_name": t.full_table_id.rsplit(".", 1)[-1],
-                "description": (getattr(t, "description", "") or "").strip(),
+                "description": (summary or desc)[:800],
+                "guidance": guidance[:2000],
                 "profile": overview[:1200],
             }
         )
@@ -347,7 +350,7 @@ def build_ask_plan(
     prior_table_ids = _tables_from_prior_sql(prior_sql, included)
     is_followup = question_is_breakdown_followup(
         question, prior_sql=prior_sql
-    )
+    ) or (bool(prior_sql) and question_wants_breakdown(question))
     if prior_table_ids and is_followup:
         prior_set = set(prior_table_ids)
         for m in matches:

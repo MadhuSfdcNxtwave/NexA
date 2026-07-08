@@ -63,6 +63,30 @@ def _relation_hint_lines(model_id: str, relations: Any) -> list[str]:
     return lines
 
 
+def _aliases_from_description(description: str) -> list[str]:
+    """Pull business aliases from ALSO KNOWN AS blocks inside model descriptions."""
+    if not description:
+        return []
+    m = re.search(
+        r"(?is)(?:ALSO KNOWN AS|Also known as)\s*:?\s*\n(.+?)(?:\n\n[A-Z#]|\Z)",
+        description,
+    )
+    if not m:
+        return []
+    out: list[str] = []
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^[\s•\-\*""]+", "", line)
+        line = line.strip('"').strip()
+        if line.startswith("- "):
+            line = line[2:].strip()
+        if len(line) > 3:
+            out.append(line)
+    return out[:10]
+
+
 def parse_model_document(doc: Any) -> dict[str, Any]:
     """Parse one YAML document into import-ready fields."""
     if not isinstance(doc, dict):
@@ -109,6 +133,9 @@ def parse_model_document(doc: Any) -> dict[str, Any]:
         aliases = [str(a).strip() for a in raw_aliases if str(a).strip()]
     elif isinstance(raw_aliases, str) and raw_aliases.strip():
         aliases = [raw_aliases.strip()]
+    for extra in _aliases_from_description(description):
+        if extra not in aliases:
+            aliases.append(extra)
 
     return {
         "model_id": model_id,
@@ -129,11 +156,36 @@ def _split_model_documents(text: str) -> list[str]:
     return [c.strip() for c in chunks if c.strip()]
 
 
+def _normalize_spreadsheet_paste(text: str) -> str:
+    """Recover YAML pasted from a spreadsheet (Excel / Google Sheets).
+
+    Sheet exports wrap each YAML in a quoted cell — `table_name<TAB>"id: ..."` —
+    and double every literal quote (`""internal""`). Extract the cells, unescape
+    the quotes, and join the documents with `---` so normal parsing works.
+    """
+    cells = re.findall(r'\t"((?:[^"]|"")+)"', text)
+    if cells:
+        docs = [c.replace('""', '"').strip() for c in cells]
+        docs = [d for d in docs if d.startswith("id:")]
+        if docs:
+            return "\n---\n".join(docs)
+
+    if '""' in text:
+        text = text.replace('""', '"').strip()
+        # A single copied cell may still carry its wrapping quotes.
+        if text.startswith('"id:'):
+            text = text[1:]
+            if text.rstrip().endswith('"'):
+                text = text.rstrip()[:-1]
+    return text
+
+
 def parse_yaml_documents(text: str) -> list[dict[str, Any]]:
     """Parse one or more YAML documents (--- separated or repeated id: blocks)."""
     text = (text or "").strip()
     if not text:
         raise ModelYamlError("Empty YAML")
+    text = _normalize_spreadsheet_paste(text)
 
     raw_docs: list[Any] = []
     try:

@@ -230,6 +230,7 @@ class Thread(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    overview_kb: Mapped[str] = mapped_column(Text, default="")
     project: Mapped[Project] = relationship(back_populates="threads")
     memories: Mapped[list["Memory"]] = relationship(back_populates="thread")
 
@@ -586,6 +587,57 @@ def _sync_default_workspace_tables() -> None:
         db.close()
 
 
+def _sync_workspace_from_default_dataset() -> None:
+    """Add all tables from BQ_DEFAULT_DATASET missing from the workspace catalog.
+
+    Local dev often has 50+ tables from manual adds / YAML import; fresh Render
+    deploys only seed DEFAULT_WORKSPACE_TABLES (~13). This keeps production in
+    sync with the full dataset without clicking Add all in the Data tab.
+    """
+    import config
+    from sqlalchemy import select
+
+    if not config.SYNC_WORKSPACE_FROM_DATASET:
+        return
+    dataset_id = (config.BQ_DEFAULT_DATASET or "").strip()
+    project = (config.GCP_PROJECT or "").strip()
+    if not dataset_id or not project or project == "your-gcp-project-id":
+        return
+    full_dataset = f"{project}.{dataset_id}"
+    try:
+        import bq
+
+        tables = bq.list_tables_in_dataset(full_dataset)
+    except Exception as e:
+        print(f"[workspace-sync] could not list {full_dataset}: {e}")
+        return
+    if not tables:
+        return
+
+    db = SessionLocal()
+    try:
+        existing = {t.full_table_id for t in db.scalars(select(WorkspaceTable)).all()}
+        added = 0
+        for tbl in tables:
+            fq = tbl.get("full_table_id")
+            if not fq or fq in existing:
+                continue
+            db.add(
+                WorkspaceTable(
+                    full_table_id=fq,
+                    description="",
+                    included_for_ai=True,
+                )
+            )
+            existing.add(fq)
+            added += 1
+        if added:
+            db.commit()
+            print(f"[workspace-sync] added {added} tables from {full_dataset}")
+    finally:
+        db.close()
+
+
 def _migrate_threads() -> None:
     """Add memories.thread_id and backfill a default thread per project."""
     from sqlalchemy import inspect, text
@@ -624,6 +676,22 @@ def _migrate_threads() -> None:
         db.commit()
     finally:
         db.close()
+
+
+def _migrate_thread_overview() -> None:
+    """Add threads.overview_kb for per-thread follow-up memory."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "threads" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("threads")}
+    if "overview_kb" not in existing:
+        with engine.begin() as conn:
+            if engine.dialect.name == "postgresql":
+                conn.execute(text("ALTER TABLE threads ADD COLUMN overview_kb TEXT DEFAULT ''"))
+            else:
+                conn.execute(text("ALTER TABLE threads ADD COLUMN overview_kb TEXT DEFAULT ''"))
 
 
 def _migrate_standalone_threads() -> None:
@@ -720,6 +788,7 @@ def init_db() -> None:
     _migrate_project_tables()
     _migrate_memories()
     _migrate_threads()
+    _migrate_thread_overview()
     _migrate_standalone_threads()
     _migrate_projects()
     _migrate_users_and_usage()
@@ -727,6 +796,7 @@ def init_db() -> None:
     _migrate_workspace_tables()
     _migrate_workspace_settings()
     _sync_default_workspace_tables()
+    _sync_workspace_from_default_dataset()
     from auth import bootstrap_admin
 
     db = SessionLocal()

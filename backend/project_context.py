@@ -36,7 +36,7 @@ def build_sql_context(
     summary = (memory_summary or "").strip()
     if summary and summary not in ("(No queries yet.)", "(No queries yet)"):
         lines.append(
-            "\n## Project memory summary (key points — prefer this for follow-ups)\n"
+            "\n## Thread knowledge base (use for follow-ups — tables, SQL, answers)\n"
             + summary
         )
 
