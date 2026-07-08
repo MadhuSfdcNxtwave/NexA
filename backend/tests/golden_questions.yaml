@@ -1,0 +1,40 @@
+# Golden eval questions — planner + compose + validate (no BigQuery required).
+- question: "What is the feedback we got till now on notice board feature in NPS form responses?"
+  expect_tables:
+    - academy_nps_form_responses
+    - nps_form_responses_nov_and_dec_2025
+  expect_sql_contains:
+    - UNION ALL
+    - notice_board_mentions
+  expect_sql_not_contains:
+    - users_contextual_feedback_details
+  expect_intent: topic_search
+  expect_model: nps_all_form_responses
+
+- question: "How many active users in learning portal now?"
+  expect_tables:
+    - academy_users_day_and_page_wise_time_spent_details
+  expect_sql_contains:
+    - lp_status
+    - ACTIVE
+  expect_sql_not_contains:
+    - pause_status IS NULL
+  expect_intent: aggregate
+  expect_model: academy_users_day_and_page_wise_time_spent_details
+  expect_measure: active_learning_portal_users
+
+- question: "What is the average NPS score by form submission month?"
+  expect_sql_contains:
+    - GROUP BY
+    - form_submission_month
+  expect_intent: breakdown
+
+- question: "How many users attended live classes and have learning portal access?"
+  expect_intent: compound
+  skip_compose: true
+
+- question: "How many unique users submitted NPS form responses?"
+  expect_sql_contains:
+    - COUNT
+    - DISTINCT
+  expect_intent: aggregate

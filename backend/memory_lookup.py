@@ -68,6 +68,7 @@ def sql_intent_mismatch_reason(
     sql: str,
     *,
     schema_entities: list | None = None,
+    query_plan: Any | None = None,
 ) -> str | None:
     """None when SQL shape plausibly answers the question; else a short reason."""
     q = expand_question_abbreviations((question or "").strip())
@@ -75,10 +76,35 @@ def sql_intent_mismatch_reason(
     if not q or not sql_text:
         return "empty question or SQL"
 
+    if query_plan is not None:
+        from query_planner import sql_plan_shape_mismatch_reason
+
+        plan_reason = sql_plan_shape_mismatch_reason(q, sql_text, query_plan)
+        if plan_reason:
+            return plan_reason
+
     if schema_entities:
         ok, reason = validate_sql_for_question(q, sql_text, schema_entities)
         if not ok:
             return reason
+
+    from query_planner import (
+        active_portal_sql_shape_ok,
+        is_nps_topic_feedback_question,
+        nps_topic_sql_shape_ok,
+    )
+
+    if is_nps_topic_feedback_question(q) and not nps_topic_sql_shape_ok(sql_text):
+        return "NPS topic feedback requires union SQL across both NPS form tables"
+
+    if re.search(
+        r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"
+        r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",
+        q,
+        re.I,
+    ) and re.search(r"\bhow many\b|\bcount\b|\bnumber of\b", q, re.I):
+        if not active_portal_sql_shape_ok(sql_text):
+            return "active portal user count requires lp_status = ACTIVE on engagement table"
 
     if question_asks_growth_cycle_count(q):
         if re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I):
@@ -112,9 +138,18 @@ def sql_matches_question_intent(
     sql: str,
     *,
     schema_entities: list | None = None,
+    query_plan: Any | None = None,
 ) -> bool:
     """True when SQL shape plausibly answers the question (pre- or post-execution)."""
-    return sql_intent_mismatch_reason(question, sql, schema_entities=schema_entities) is None
+    return (
+        sql_intent_mismatch_reason(
+            question,
+            sql,
+            schema_entities=schema_entities,
+            query_plan=query_plan,
+        )
+        is None
+    )
 
 
 def stored_answer_matches_question(
@@ -138,6 +173,12 @@ def stored_answer_matches_question(
     if not ok:
         return False
     if not (rows or []) and not (sql or "").strip():
+        return False
+    from query_planner import is_nps_topic_feedback_question, nps_topic_sql_shape_ok
+
+    if is_nps_topic_feedback_question(question) and not nps_topic_sql_shape_ok(
+        sql or "", columns=columns
+    ):
         return False
     if not sql_matches_question_intent(question, sql, schema_entities=schema_entities):
         return False

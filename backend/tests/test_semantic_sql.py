@@ -52,13 +52,12 @@ class SemanticSqlTests(unittest.TestCase):
         table = SimpleNamespace(
             full_table_id=(
                 "kossip-helpers.academy_success_ai_analytics_worksapce."
-                "z_ccbp_academy_users_master_data"
+                "academy_users_day_and_page_wise_time_spent_details"
             ),
             column_descriptions_json=json.dumps(
                 {
                     "user_id": "id",
-                    "pause_status": "Pause means paused",
-                    "learning_portal_onboarding_access_given_datetime": "portal access",
+                    "lp_status": "ACTIVE EXPIRED REVOKED",
                 }
             ),
             ai_profile_json="{}",
@@ -67,10 +66,9 @@ class SemanticSqlTests(unittest.TestCase):
         plan = try_build_measure_plan(question, [table])
         self.assertIsNotNone(plan)
         sql = compose_sql(plan, question, table)
-        self.assertIn("master_data", sql)
-        self.assertIn("pause_status", sql.lower())
-        self.assertIn("learning_portal_onboarding_access_given_datetime", sql.lower())
-        self.assertIn("IS NULL", sql.upper())
+        self.assertIn("day_and_page_wise_time_spent", sql)
+        self.assertIn("lp_status", sql.lower())
+        self.assertIn("ACTIVE", sql)
 
 
 if __name__ == "__main__":

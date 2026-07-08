@@ -125,10 +125,10 @@ def _score_semantic_table(question: str, semantic: TableSemantic) -> int:
     if re.search(r"\battend", q) and "cloudwatch" in name:
         score -= 300
     if re.search(r"\bactive\b", q) and re.search(r"\blearning[\s_-]*portal|\bportal\b", q):
-        if name == "z_ccbp_academy_users_master_data":
-            score += 500
         if name == "academy_users_day_and_page_wise_time_spent_details":
-            score -= 200
+            score += 650
+        if name == "z_ccbp_academy_users_master_data":
+            score += 200
         if "question_wise" in name or "question_set" in name:
             score -= 400
     if re.search(r"\bactive\b", q) and re.search(r"\bplatform\b", q):

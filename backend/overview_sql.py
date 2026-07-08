@@ -151,12 +151,17 @@ def _month_filter(col: str, col_type: str, month: int, year: int) -> str:
     )
 
 
-def _active_clause(cols: set[str], overview: str) -> str | None:
+def _active_clause(cols: set[str], overview: str, *, portal: bool = False) -> str | None:
+    parts: list[str] = []
     if "pause_status" in cols:
-        return "pause_status IS NULL"
-    if re.search(r"pause_status IS NULL", overview, re.I):
-        return "pause_status IS NULL"
-    return None
+        parts.append("pause_status IS NULL")
+    elif re.search(r"pause_status IS NULL", overview, re.I):
+        parts.append("pause_status IS NULL")
+    if portal and "learning_portal_onboarding_access_given_datetime" in cols:
+        parts.append("learning_portal_onboarding_access_given_datetime IS NOT NULL")
+    if not parts:
+        return None
+    return " AND ".join(parts)
 
 
 def try_build_overview_sql(
@@ -219,7 +224,7 @@ def try_build_overview_sql(
     if not id_col:
         return None
 
-    active = _active_clause(cols, overview)
+    active = _active_clause(cols, overview, portal=bool(_PORTAL.search(q)))
     if active and (_ACTIVE.search(q) or _PORTAL.search(q)):
         where.append(active)
         label_bits.append("active")

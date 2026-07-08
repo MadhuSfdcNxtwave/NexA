@@ -64,7 +64,18 @@ services:
       - key: CREDITS_PER_GB
         value: "1"
       - key: CORS_ORIGINS
-        sync: false                # set to the web URL after first deploy
+        fromService:
+          name: nexa
+          type: web
+          property: url
+      - key: HEX_STYLE_PIPELINE
+        value: "true"
+      - key: SQL_VERIFY_WITH_LLM
+        value: "false"
+      - key: EMBEDDING_RETRIEVAL_ENABLED
+        value: "false"
+      - key: SYNC_WORKSPACE_FROM_DATASET
+        value: "1"
 
   # ---- Frontend (static React build) ----
   - type: web
@@ -75,7 +86,10 @@ services:
     staticPublishPath: ./dist
     envVars:
       - key: VITE_API_URL
-        sync: false                # set to the API URL after first deploy
+        fromService:
+          name: nexa-api
+          type: web
+          property: url
     routes:
       - type: rewrite
         source: /*

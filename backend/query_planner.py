@@ -13,6 +13,11 @@ _BREAKDOWN_RE = re.compile(
     r"\bby\s+([a-z_][a-z0-9_\s]{1,40}?)(?:\s*[?.!,]|$|\s+and\s|\s+for\s)",
     re.I,
 )
+_TREND_RE = re.compile(
+    r"\btrend\b|\bover time\b|\bmonthly\b|\bweekly\b|\bdaily\b|"
+    r"\bby month\b|\bby week\b|\bmom\b|\byoy\b|\beach month\b",
+    re.I,
+)
 _NPS = re.compile(
     r"\bnps\b|net promoter|rating_on_scale|promoter|detractor|"
     r"rating.{0,12}\(0.{0,3}10\)|scale of 0",
@@ -39,6 +44,11 @@ _AGG_BLOCK = re.compile(
     r"monthly nps|rating)\b",
     re.I,
 )
+_PORTAL_ACTIVE = re.compile(
+    r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"
+    r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",
+    re.I,
+)
 
 
 @dataclass
@@ -48,10 +58,29 @@ class QueryPlan:
     topic: str | None = None
     topic_regex: str | None = None
     measure_id: str | None = None
+    dimensions: list[str] = field(default_factory=list)
     group_by: list[str] = field(default_factory=list)
     filters: list[str] = field(default_factory=list)
+    viz_hint: str = "table"
     union_member_ids: list[str] = field(default_factory=list)
+    entity: str = "general"
+    domain_signals: list[str] = field(default_factory=list)
     reason: str = ""
+
+    def to_trace_dict(self) -> dict[str, Any]:
+        return {
+            "model_id": self.model_id,
+            "intent": self.intent,
+            "measure_id": self.measure_id,
+            "dimensions": self.dimensions[:6],
+            "filters": self.filters[:6],
+            "viz_hint": self.viz_hint,
+            "topic": self.topic,
+            "entity": self.entity,
+            "domain_signals": self.domain_signals,
+            "union_members": self.union_member_ids[:4],
+            "reason": (self.reason or "")[:200],
+        }
 
 
 def extract_topic(question: str) -> str | None:
@@ -75,13 +104,38 @@ def topic_to_regex(topic: str) -> str:
     return r" ?".join(re.escape(w) for w in words)
 
 
+def infer_viz_hint(question: str, intent: str) -> str:
+    """Chart/table hint for presentation: table | line | bar | scalar | none."""
+    from question_intent import question_wants_breakdown
+
+    q = (question or "").strip()
+    if intent == "topic_search":
+        return "table"
+    if intent == "compound":
+        return "scalar"
+    if intent == "survey_distribution":
+        return "bar"
+    if _TREND_RE.search(q):
+        return "line"
+    if question_wants_breakdown(q) or (intent == "breakdown" and _BREAKDOWN_RE.search(q)):
+        return "bar"
+    if intent == "aggregate" and (_COUNT_RE.search(q) or _AVG_RE.search(q)):
+        if not question_wants_breakdown(q) and not _BREAKDOWN_RE.search(q):
+            return "scalar"
+    return "table"
+
+
 def classify_intent(question: str) -> str:
-    """Return planner intent: topic_search | survey_distribution | aggregate | breakdown."""
+    """Return planner intent: topic_search | survey_distribution | aggregate | breakdown | compound."""
     from question_intent import expand_question_abbreviations
+    from table_routing import is_compound_domain_question
 
     q = expand_question_abbreviations((question or "").strip())
     if not q:
         return "aggregate"
+
+    if is_compound_domain_question(q):
+        return "compound"
 
     topic = extract_topic(q)
     if topic and not _AGG_BLOCK.search(q):
@@ -117,6 +171,97 @@ def is_nps_topic_feedback_question(question: str) -> bool:
     return classify_intent(q) == "topic_search"
 
 
+def nps_topic_sql_shape_ok(
+    sql: str,
+    *,
+    columns: list[Any] | None = None,
+) -> bool:
+    """True when SQL matches Hex-style NPS topic search (union both tables + mentions)."""
+    sql_text = (sql or "").strip()
+    if not sql_text:
+        return False
+    sql_l = sql_text.lower()
+    if "union all" not in sql_l:
+        return False
+    if "nps_form_responses_nov_and_dec_2025" not in sql_l:
+        return False
+    if "academy_nps_form_responses" not in sql_l:
+        return False
+    if "(?i)" in sql_text:
+        return False
+    if columns is not None:
+        cols_l = [str(c).lower() for c in columns]
+        if not any("mentions" in c for c in cols_l):
+            return False
+    return True
+
+
+def active_portal_sql_shape_ok(sql: str) -> bool:
+    """True when SQL counts active portal users via lp_status, not master-data access."""
+    sql_l = (sql or "").lower()
+    if not sql_l:
+        return False
+    if "lp_status" in sql_l and "active" in sql_l:
+        return True
+    if "day_and_page_wise" in sql_l and "lp_status" in sql_l:
+        return True
+    return False
+
+
+def sql_plan_shape_mismatch_reason(
+    question: str,
+    sql: str,
+    plan: QueryPlan | None,
+) -> str | None:
+    """Intent-specific SQL shape checks tied to QueryPlan."""
+    if plan is None:
+        return None
+    q = (question or "").strip()
+    sql_text = (sql or "").strip()
+    if not sql_text:
+        return "empty SQL"
+
+    if plan.intent == "topic_search" and (plan.union_member_ids or plan.model_id == "nps_all_form_responses"):
+        if is_nps_topic_feedback_question(q) and not nps_topic_sql_shape_ok(sql_text):
+            return "NPS topic feedback requires UNION ALL across both NPS form tables"
+
+    if plan.intent == "compound":
+        from table_routing import validate_sql_table_choice
+
+        ok, reason = validate_sql_table_choice(q, sql_text)
+        if not ok:
+            return reason
+
+    if plan.intent == "breakdown" and not re.search(r"\bGROUP BY\b", sql_text, re.I):
+        return "breakdown intent requires GROUP BY"
+
+    if (
+        plan.model_id == "academy_users_day_and_page_wise_time_spent_details"
+        or plan.measure_id == "active_learning_portal_users"
+        or _PORTAL_ACTIVE.search(q)
+    ):
+        if _PORTAL_ACTIVE.search(q) and re.search(r"\bhow many\b|\bcount\b|\bnumber of\b", q, re.I):
+            if not active_portal_sql_shape_ok(sql_text):
+                return "active portal user count requires lp_status = ACTIVE on engagement table"
+
+    return None
+
+
+def _routing_sql_filters(question: str, model_id: str) -> list[str]:
+    from table_routing import match_routing_rule
+
+    rule = match_routing_rule(question)
+    if not rule or rule.table_short != model_id:
+        return []
+    return [f.to_sql() for f in rule.filters if f.to_sql()]
+
+
+def _detect_entity(question: str) -> str:
+    from ask_context import _detect_entity as detect
+
+    return detect(question)
+
+
 def _score_model(question: str, semantic: TableSemantic) -> int:
     q = question.lower()
     name = semantic.model_id.lower()
@@ -138,6 +283,12 @@ def _score_model(question: str, semantic: TableSemantic) -> int:
     if semantic.is_logical_union and _NPS_FORM.search(q):
         score += 700
 
+    if _PORTAL_ACTIVE.search(q):
+        if "day_and_page_wise" in name:
+            score += 500
+        if "master_data" in name:
+            score -= 300
+
     from table_routing import score_adjustment
 
     score += score_adjustment(question, semantic.short_name or semantic.model_id)
@@ -148,8 +299,7 @@ def _score_model(question: str, semantic: TableSemantic) -> int:
 
 def _resolve_logical_union(question: str) -> TableSemantic | None:
     catalog = load_semantic_catalog()
-    q = question.lower()
-    if not _NPS_FORM.search(q):
+    if not _NPS_FORM.search(question.lower()):
         return None
     return catalog.get("nps_all_form_responses")
 
@@ -203,9 +353,23 @@ def try_build_query_plan(
         return None
 
     intent = classify_intent(q)
+
+    if intent == "compound":
+        from table_routing import detect_domain_signals
+
+        signals = sorted(detect_domain_signals(q))
+        return QueryPlan(
+            model_id="compound",
+            intent=intent,
+            domain_signals=signals,
+            reason=f"Compound domain join: {', '.join(signals)}",
+        )
+
     semantic = _pick_model(q, selected_tables, catalog_tables)
     if not semantic:
         return None
+
+    routing_filters = _routing_sql_filters(q, semantic.model_id)
 
     if intent == "topic_search":
         topic = extract_topic(q)
@@ -221,6 +385,7 @@ def try_build_query_plan(
             topic=topic,
             topic_regex=regex,
             union_member_ids=members,
+            filters=routing_filters,
             reason=f"Topic search `{topic}` on model `{semantic.model_id}`",
         )
 
@@ -228,6 +393,7 @@ def try_build_query_plan(
         return QueryPlan(
             model_id=semantic.model_id,
             intent=intent,
+            filters=routing_filters,
             reason=f"Survey answer distribution on `{semantic.model_id}`",
         )
 
@@ -243,14 +409,76 @@ def try_build_query_plan(
             return None
         mp = try_build_measure_plan(q, [table_for_measure], catalog_tables=pool)
         if not mp:
+            if _PORTAL_ACTIVE.search(q) and semantic.model_id == "academy_users_day_and_page_wise_time_spent_details":
+                return QueryPlan(
+                    model_id=semantic.model_id,
+                    intent="aggregate",
+                    measure_id="active_learning_portal_users",
+                    filters=routing_filters or ["`lp_status` = 'ACTIVE'"],
+                    reason="Active learning portal users (lp_status = ACTIVE)",
+                )
             return None
+        dims = list(mp.group_by)
+        if intent == "breakdown" and not dims:
+            m = _BREAKDOWN_RE.search(q)
+            if m:
+                token = (m.group(1) or "").strip().split()[0].lower()
+                for d in semantic.dimensions:
+                    if d.id.lower() == token or token in d.id.lower():
+                        dims = [d.id]
+                        break
+        merged_filters = list(mp.filters)
+        for f in routing_filters:
+            if f not in merged_filters:
+                merged_filters.append(f)
         return QueryPlan(
             model_id=semantic.model_id,
             intent=intent,
             measure_id=mp.measure.id,
-            group_by=list(mp.group_by),
-            filters=list(mp.filters),
+            group_by=dims,
+            dimensions=dims,
+            filters=merged_filters,
             reason=mp.reason or f"Aggregate on `{semantic.model_id}`",
         )
 
     return None
+
+
+def analyze_question(
+    question: str,
+    selected_tables: list[Any],
+    *,
+    catalog_tables: list[Any] | None = None,
+    columns_by_table: dict[str, set[str]] | None = None,
+) -> QueryPlan | None:
+    """
+    Unified intent analyzer — merges ask_context entity, table_routing signals,
+    question_intent breakdown flags, and YAML semantic model selection.
+    """
+    q = (question or "").strip()
+    if not q:
+        return None
+
+    plan = try_build_query_plan(
+        q,
+        selected_tables,
+        catalog_tables=catalog_tables,
+        columns_by_table=columns_by_table,
+    )
+    if not plan:
+        return None
+
+    plan.entity = _detect_entity(q)
+    plan.viz_hint = infer_viz_hint(q, plan.intent)
+    from table_routing import detect_domain_signals
+
+    plan.domain_signals = sorted(detect_domain_signals(q))
+    if plan.group_by and not plan.dimensions:
+        plan.dimensions = list(plan.group_by)
+    elif plan.dimensions and not plan.group_by:
+        plan.group_by = list(plan.dimensions)
+
+    if not plan.filters:
+        plan.filters = _routing_sql_filters(q, plan.model_id)
+
+    return plan

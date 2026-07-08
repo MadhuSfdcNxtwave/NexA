@@ -312,6 +312,43 @@ def _plan_columns_for_selection(
     return kb_columns, kb_filters, measure
 
 
+def _apply_intent_rerank(matches: list[TableMatch], question: str) -> None:
+    """Boost table scores using planner intent before final routing selection."""
+    try:
+        from query_planner import classify_intent
+
+        intent = classify_intent(question)
+    except Exception:
+        return
+
+    q = question.lower()
+    for m in matches:
+        short = m.short_name.lower()
+        if intent == "topic_search":
+            if "nps" in short and "contextual" not in short:
+                m.score += 220
+            if "contextual_feedback" in short and ("nps" in q or "form responses" in q):
+                m.score -= 350
+            if short == "nps_all_form_responses" or "nps_all" in short:
+                m.score += 300
+        elif intent in ("aggregate", "breakdown"):
+            if re.search(
+                r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"
+                r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",
+                q,
+            ):
+                if "day_and_page_wise" in short:
+                    m.score += 450
+                if "master_data" in short:
+                    m.score -= 250
+        elif intent == "survey_distribution":
+            if "contextual_feedback" in short or "survey" in short:
+                m.score += 180
+        elif intent == "compound":
+            if any(k in short for k in ("attendance", "master_data", "engagement")):
+                m.score += 200
+
+
 def build_ask_plan(
     question: str,
     project_tables: list[Any],
@@ -345,6 +382,7 @@ def build_ask_plan(
             )
         )
 
+    _apply_intent_rerank(matches, question)
     matches.sort(key=lambda m: (-m.score, m.short_name.lower()))
 
     prior_table_ids = _tables_from_prior_sql(prior_sql, included)

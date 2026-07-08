@@ -58,8 +58,13 @@ def compose_sql(plan: MeasurePlan, question: str, table: object) -> str:
             if m.id == plan.measure.id and m.filters:
                 for fid in m.filters:
                     dim = sem.dimension_by_id(fid)
-                    if dim:
-                        where_parts.append(f"{sem.dim_sql(dim.id)} IS NOT NULL")
+                    if not dim:
+                        continue
+                    expr = sem.dim_sql(dim.id)
+                    if dim.dim_type == "boolean" and dim.expr_sql:
+                        where_parts.append(f"({expr})")
+                    else:
+                        where_parts.append(f"{expr} IS NOT NULL")
     rel = resolve_relative_range(question)
     if rel:
         date_col = pick_date_column(table)

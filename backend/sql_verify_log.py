@@ -27,9 +27,13 @@ def log_sql_verification(
     passed: bool,
     issues: list[str] | None = None,
     source: str = "",
+    plan: dict[str, Any] | None = None,
 ) -> None:
     if not audit or not audit.db:
         return
+    payload: dict[str, Any] = {"issues": issues or []}
+    if plan:
+        payload["plan"] = plan
     row = SqlVerificationLog(
         project_id=audit.project_id,
         user_id=audit.user_id,
@@ -38,7 +42,7 @@ def log_sql_verification(
         attempt=max(1, attempt),
         phase=(phase or "unknown")[:40],
         passed=bool(passed),
-        issues_json=json.dumps(issues or []),
+        issues_json=json.dumps(payload),
         source=(source or "")[:40],
         llm_provider=config.SQL_PROVIDER or config.FETCH_PROVIDER,
         llm_model=config.FETCH_MODEL,

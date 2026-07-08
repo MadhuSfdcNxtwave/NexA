@@ -12,16 +12,52 @@ export default function ThreadPage() {
   const location = useLocation();
   const [thread, setThread] = useState(null);
   const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.getThread(threadId).then(setThread).catch(() => setThread(null));
-    api.listProjects().then(setProjects);
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    setThread(null);
+    Promise.all([
+      api.getThread(threadId),
+      api.listProjects(),
+    ])
+      .then(([t, list]) => {
+        if (cancelled) return;
+        setThread(t);
+        setProjects(list);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e.message || "Could not load thread");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [threadId]);
 
-  if (!thread) {
+  if (loading) {
     return (
       <AppShell projects={projects} onProjectsChange={() => api.listProjects().then(setProjects)}>
         <LoadingScreen message="Loading thread…" fullScreen />
+      </AppShell>
+    );
+  }
+
+  if (error || !thread) {
+    return (
+      <AppShell projects={projects} onProjectsChange={() => api.listProjects().then(setProjects)}>
+        <div className="error" style={{ margin: 24 }}>
+          {error || "Thread not found"}
+          <div style={{ marginTop: 12 }}>
+            <Link to="/threads">← Back to threads</Link>
+          </div>
+        </div>
       </AppShell>
     );
   }

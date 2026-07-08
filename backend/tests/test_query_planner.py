@@ -124,6 +124,9 @@ class QueryPlannerTests(unittest.TestCase):
         self.assertIn("nps_form_responses_nov_and_dec_2025", low)
         self.assertIn("regexp_contains", low)
         self.assertIn("notice ?board", sql)
+        self.assertIn("notice_board_mentions", sql)
+        self.assertIn("endorsed AS", sql)
+        self.assertIn("old AS", sql)
         self.assertNotIn("users_contextual_feedback_details", low)
         self.assertNotIn("count(distinct", low)
 
@@ -151,6 +154,24 @@ class QueryPlannerTests(unittest.TestCase):
         self.assertIn("nps_form_responses_nov_and_dec_2025", sql)
         shorts = {t.full_table_id.rsplit(".", 1)[-1] for t in (picked or [])}
         self.assertIn("nps_form_responses_nov_and_dec_2025", shorts)
+
+    def test_stale_single_table_nps_topic_cache_rejected(self) -> None:
+        from memory_lookup import stored_answer_matches_question
+
+        stale_sql = (
+            "SELECT `user_id`, `rating_on_scale_of_0_to_10` AS nps_rating "
+            "FROM `kossip-helpers.academy_success_ai_analytics_worksapce.academy_nps_form_responses` "
+            "WHERE REGEXP_CONTAINS(CONCAT(COALESCE(`please_share_a_short_noteA_about_what_worked_well_for_you`, ''), "
+            r"' '), r'(?i)(notice board)') LIMIT 200"
+        )
+        self.assertFalse(
+            stored_answer_matches_question(
+                NPS_Q,
+                sql=stale_sql,
+                columns=["user_id", "nps_rating", "feedback_note"],
+                rows=[{"user_id": "u1", "nps_rating": 9}],
+            )
+        )
 
 
 if __name__ == "__main__":

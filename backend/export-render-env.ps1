@@ -1,10 +1,10 @@
 # Build one paste-ready env block for Render "Add from .env".
 # Usage (from backend folder):
 #   .\export-render-env.ps1
-#   .\export-render-env.ps1 -CorsOrigin "https://nexa.onrender.com"
+#   .\export-render-env.ps1 -CorsOrigin "https://nexa-1-9end.onrender.com"
 #   .\export-render-env.ps1 -CopyToClipboard
 param(
-    [string]$CorsOrigin = "https://nexa.onrender.com",
+    [string]$CorsOrigin = "https://nexa-1-9end.onrender.com",
     [string]$EnvFile = ".env",
     [string]$KeyFile = "gcp-sa-config.json",
     [string]$OutFile = "..\render-paste.env",

@@ -1114,6 +1114,14 @@ base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`aca\
 measures:
   - id: count_of_records
     func: count
+  - id: unique_responders
+    func: count_distinct
+    of: user_id
+    description: Distinct users who submitted NPS form responses
+  - id: avg_nps_rating
+    func: avg
+    of: rating_on_scale_of_0_to_10
+    description: Average 0-10 NPS rating from form submissions
 dimensions:
   - id: user_month_key
     type: string
@@ -2398,6 +2406,8 @@ measures:
   - id: active_learning_portal_users
     func: count_distinct
     of: user_id
+    filters:
+      - is_lp_active
     description: Count of unique users with learning portal access status ACTIVE (lp_status)
 dimensions:
   - id: user_date_page_key
@@ -2419,6 +2429,11 @@ dimensions:
         • ACTIVE    (user currently has learning portal access)
         • EXPIRED   (user currently does not have learning portal access — access period expired or was explicitly removed)
         • REVOKED   (user access was removed earlier and later restored; the user currently has access)
+  - id: is_lp_active
+    type: boolean
+    expr_sql: ${lp_status} = 'ACTIVE'
+    description: TRUE when the user currently has active learning portal access
+    visibility: "internal"
   - id: time_spent_date
     type: date
     description: Date on which the user spent time on the learning portal. This
@@ -4941,6 +4956,14 @@ base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`nps\
 measures:
   - id: count_of_records
     func: count
+  - id: unique_responders
+    func: count_distinct
+    of: user_id
+    description: Distinct users in Nov/Dec 2025 NPS snapshot
+  - id: avg_nps_rating
+    func: avg
+    of: on_a_scale_of_0_10_how_likely_are_you_to_recommend_nxtwaves_academy_program_to_a_friend_or_peer
+    description: Average 0-10 NPS rating
 dimensions:
   - id: user_submission_key
     type: string
@@ -5850,11 +5873,22 @@ relations:
 
 id: y_academy_user_daily_engagement_time_spent
 type: model
+description: Daily platform engagement time spent per user — use for active platform users and time-on-platform trends.
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`y_a\
   cademy_user_daily_engagement_time_spent`"
 measures:
   - id: count_of_records
     func: count
+  - id: active_platform_users
+    func: count_distinct
+    of: user_id
+    filters:
+      - has_platform_time
+    description: Users with at least 1 minute platform time on the day
+  - id: total_platform_minutes
+    func: sum
+    of: time_spent_on_platform_in_minutes
+    description: Total minutes spent on learning platform
 dimensions:
   - id: user_date_key
     type: string
@@ -5868,6 +5902,11 @@ dimensions:
   - id: time_spent_on_platform_in_minutes
     type: number
     description: total time spent on learning platform in minutes
+  - id: has_platform_time
+    type: boolean
+    expr_sql: ${time_spent_on_platform_in_minutes} >= 1
+    description: TRUE when user spent at least 1 minute on platform that day
+    visibility: "internal"
   - id: time_spent_on_live_classes_in_minutes
     type: number
     description: total time spent on live classes in minutes
@@ -6793,6 +6832,12 @@ measures:
     func: count_distinct
     of: user_id
     description: Count of unique users with live class attendance records
+  - id: joined_attendance_users
+    func: count_distinct
+    of: user_id
+    filters:
+      - is_joined
+    description: Users who joined live class sessions (attendance_status = JOINED)
 dimensions:
   - id: user_slot_key
     type: string
@@ -6862,6 +6907,11 @@ dimensions:
         • CAME_BEFORE_NOT_JOINED     (didn't join but came before the session)
         • CAME_DURING_NOT_JOINED     (didn't join but came during the session)
         • CAME_AFTER_NOT_JOINED      (didn't join but came to the page after the meet ended)
+  - id: is_joined
+    type: boolean
+    expr_sql: ${attendance_status} = 'JOINED'
+    description: TRUE when user joined the live class session
+    visibility: "internal"
   - id: first_connected_datetime
     type: timestamp_naive
     description: first joined datetime of the user for the slot
@@ -7709,7 +7759,13 @@ measures:
   - id: active_learning_portal_users
     func: count_distinct
     of: user_id
-    description: Users with learning portal access granted and not paused (pause_status IS NULL)
+    filters:
+      - is_not_paused
+      - has_portal_access_granted
+    description: >-
+      Users with learning portal onboarding access granted and not paused.
+      For currently ACTIVE access (~34k), prefer lp_status from
+      academy_users_day_and_page_wise_time_spent_details.
 dimensions:
   - id: user_id
     type: string
@@ -7723,6 +7779,16 @@ dimensions:
     type: string
     description: Indicates whether the user’s learning schedule is paused; 'Pause'
       means paused, NULL means active
+  - id: is_not_paused
+    type: boolean
+    expr_sql: ${pause_status} IS NULL
+    description: TRUE when the user is not on a learning pause
+    visibility: "internal"
+  - id: has_portal_access_granted
+    type: boolean
+    expr_sql: ${learning_portal_onboarding_access_given_datetime} IS NOT NULL
+    description: TRUE when learning portal onboarding access was granted
+    visibility: "internal"
   - id: preferred_languages_for_communication
     type: string
     description: Preferred language(s) selected by the user for communication
@@ -8796,6 +8862,14 @@ description: >-
   Unified NPS form responses across the ongoing monthly table and the Nov/Dec 2025
   legacy snapshot. Use this model for topic search and feedback analysis spanning
   all NPS submissions.
+measures:
+  - id: count_of_records
+    func: count
+    description: Total NPS form response rows across union members
+  - id: unique_responders
+    func: count_distinct
+    of: user_id
+    description: Distinct users with NPS form submissions (union of both tables)
 union:
   - academy_nps_form_responses
   - nps_form_responses_nov_and_dec_2025

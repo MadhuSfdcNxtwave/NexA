@@ -534,23 +534,24 @@ def _try_planner_sql(
     *,
     catalog_tables: list | None = None,
     schema_entities: list | None = None,
-) -> tuple[str | None, str, list | None]:
+    query_plan=None,
+) -> tuple[str | None, str, list | None, Any | None]:
     """Model-facing query planner — topic search, survey distribution, aggregates."""
     if not config.HEX_STYLE_PIPELINE:
-        return None, "", None
+        return None, "", None, None
     from memory_lookup import sql_matches_question_intent
     from query_compose import compose_query_plan
-    from query_planner import try_build_query_plan
+    from query_planner import analyze_question
 
     pool = catalog_tables or selected_tables
-    plan = try_build_query_plan(
+    plan = query_plan or analyze_question(
         question,
         selected_tables,
         catalog_tables=pool,
         columns_by_table=columns_by_table,
     )
     if not plan:
-        return None, "", None
+        return None, "", None, None
     raw = compose_query_plan(
         plan,
         question,
@@ -559,16 +560,31 @@ def _try_planner_sql(
         catalog_tables=pool,
     )
     if not raw:
-        return None, plan.reason, None
+        return None, plan.reason, None, plan
     planner_tables, planner_cols = _planner_tables_for_plan(
         plan, selected_tables, pool, columns_by_table
     )
     try:
         sql = bq.validate_select_only(raw)
     except ValueError:
-        return None, plan.reason, None
-    if not sql_matches_question_intent(question, sql, schema_entities=schema_entities):
-        return None, plan.reason, None
+        return None, plan.reason, None, plan
+    if not sql_matches_question_intent(
+        question,
+        sql,
+        schema_entities=schema_entities,
+        query_plan=plan,
+    ):
+        from debug_session import ask_trace
+
+        ask_trace(
+            "planner_sql",
+            question=question[:200],
+            hit=False,
+            reason="intent_mismatch",
+            sql_preview=(sql or "")[:300],
+            plan=plan.to_trace_dict(),
+        )
+        return None, plan.reason, None, plan
     planner_hints = _column_hints_map(planner_tables)
     planner_inferred, _ = _infer_hints_for_tables(planner_tables)
     violations = validate_sql(
@@ -580,8 +596,29 @@ def _try_planner_sql(
         columns_by_table=planner_cols,
     )
     if violations:
-        return None, plan.reason, None
-    return sql, plan.reason, planner_tables or None
+        from debug_session import ask_trace
+
+        ask_trace(
+            "planner_sql",
+            question=question[:200],
+            hit=False,
+            reason="validation",
+            issues=violations[:5],
+            sql_preview=(sql or "")[:300],
+            plan=plan.to_trace_dict(),
+        )
+        return None, plan.reason, None, plan
+    from debug_session import ask_trace
+
+    ask_trace(
+        "planner_sql",
+        question=question[:200],
+        hit=True,
+        reason=plan.reason[:200] if plan.reason else "",
+        sql_preview=(sql or "")[:300],
+        plan=plan.to_trace_dict(),
+    )
+    return sql, plan.reason, planner_tables or None, plan
 
 
 def _try_semantic_template_sql(
@@ -1555,6 +1592,23 @@ def iter_ask(
 
     query_ctx = enrich_query_context(query_ctx, selected, columns_by_table)
 
+    query_plan = None
+    if config.HEX_STYLE_PIPELINE:
+        from query_planner import analyze_question
+
+        query_plan = analyze_question(
+            question,
+            selected,
+            catalog_tables=included_tables,
+            columns_by_table=columns_by_table,
+        )
+        ask_trace(
+            "intent_plan",
+            question=question[:200],
+            hit=bool(query_plan),
+            plan=query_plan.to_trace_dict() if query_plan else {},
+        )
+
     knowledges = [kb.load_table_knowledge(t) for t in selected]
     column_matches: dict[str, list[kb.ColumnMatch]] = {}
     for k in knowledges:
@@ -1641,6 +1695,17 @@ def iter_ask(
     from question_dates import build_date_hints
 
     date_hints = build_date_hints(question, selected)
+    compact_context = ""
+    if config.HEX_STYLE_PIPELINE and query_plan:
+        from context_builder import build_model_context
+
+        compact_context = build_model_context(
+            query_plan,
+            selected_tables=selected,
+            date_hints=date_hints,
+            join_block=join_block,
+            thread_memory=project_context[:1200] if project_context else "",
+        )
     if date_hints:
         schema_text += "\n\n" + date_hints
     if join_block:
@@ -1685,9 +1750,16 @@ def iter_ask(
         chain_plan: list[dict[str, str]] = []
         from domain_sql import is_domain_question, resolve_domain_sql
 
-        domain_resolved = resolve_domain_sql(question, included_tables)
+        if not config.HEX_STYLE_PIPELINE:
+            domain_resolved = resolve_domain_sql(question, included_tables)
+
         if config.HEX_STYLE_PIPELINE and not domain_resolved:
-            if not is_domain_question(question, included_tables):
+            skip_chain = bool(
+                query_plan
+                and query_plan.intent
+                in ("topic_search", "aggregate", "breakdown", "survey_distribution", "compound")
+            )
+            if not skip_chain and not is_domain_question(question, included_tables):
                 yield {
                     "type": "status",
                     "message": "Checking if this needs multiple SQL steps…",
@@ -1791,7 +1863,8 @@ def iter_ask(
 
                 clar_payload = None
                 semantic_reason = ""
-                template_sql, semantic_reason, semantic_tables = _try_planner_sql(
+                planner_plan = query_plan
+                template_sql, semantic_reason, semantic_tables, planner_plan = _try_planner_sql(
                     question,
                     selected,
                     hints_map,
@@ -1799,7 +1872,10 @@ def iter_ask(
                     columns_by_table,
                     catalog_tables=included_tables,
                     schema_entities=query_ctx.schema_entities,
+                    query_plan=query_plan,
                 )
+                if planner_plan:
+                    query_plan = planner_plan
                 sql_source = "planner" if template_sql else sql_source
                 if not template_sql:
                     template_sql, semantic_reason, semantic_tables = _try_semantic_template_sql(
@@ -1866,6 +1942,21 @@ def iter_ask(
                         schema_entities=query_ctx.schema_entities,
                         prior_sql=prior_sql,
                     )
+                if not template_sql and config.HEX_STYLE_PIPELINE:
+                    domain_resolved = resolve_domain_sql(question, included_tables)
+                    if domain_resolved:
+                        template_sql, domain_table, domain_reason = domain_resolved
+                        semantic_tables = [domain_table]
+                        semantic_reason = domain_reason
+                        sql_source = "domain"
+                        ask_trace(
+                            "domain_sql",
+                            question=question[:200],
+                            hit=True,
+                            reason=domain_reason,
+                            sql_preview=(template_sql or "")[:300],
+                            plan=query_plan.to_trace_dict() if query_plan else {},
+                        )
                 if template_sql:
                     from memory_lookup import sql_matches_question_intent
                     from nps_sql import is_nps_analytics_question
@@ -1879,6 +1970,7 @@ def iter_ask(
                         question,
                         template_sql,
                         schema_entities=query_ctx.schema_entities,
+                        query_plan=query_plan,
                     ):
                         log_sql_verification(
                             audit,
@@ -1889,9 +1981,10 @@ def iter_ask(
                             passed=False,
                             issues=["Template SQL does not match question intent."],
                             source="template",
+                            plan=query_plan.to_trace_dict() if query_plan else None,
                         )
                         template_sql = None
-                if template_sql and config.SQL_VERIFY_WITH_LLM:
+                if template_sql and config.SQL_VERIFY_WITH_LLM and sql_source != "planner":
                     vlabel = _validation_label(question)
                     yield {
                         "type": "validating_sql",
@@ -1918,7 +2011,8 @@ def iter_ask(
                         phase="approved",
                         passed=True,
                         issues=[],
-                        source="semantic" if sql_source == "semantic" else "template",
+                        source=sql_source or "template",
+                        plan=query_plan.to_trace_dict() if query_plan else None,
                     )
                     yield {
                         "type": "sql_verified",
@@ -1938,9 +2032,14 @@ def iter_ask(
                     chain_steps = None
                 else:
                     sql = None
+                    llm_schema = (
+                        f"{compact_context}\n\n---\n\n{schema_text}"
+                        if compact_context
+                        else schema_text
+                    )
                     for event, candidate in _iter_validated_sql(
                         question,
-                        schema_text,
+                        llm_schema,
                         project_context,
                         selected,
                         hints_map,
@@ -2205,6 +2304,9 @@ def iter_ask(
                 pass
 
     yield {"type": "analyzing", "message": "Preparing your results…"}
+    presentation_hints = list(query_ctx.presentation_hints)
+    if query_plan and query_plan.viz_hint:
+        presentation_hints.append(f"viz_hint:{query_plan.viz_hint}")
     try:
         viz_rows, chart_spec, analysis = llm.build_presentation(
             question,
@@ -2213,7 +2315,7 @@ def iter_ask(
             sample=sample,
             sql=sql or "",
             entity_label=query_ctx.entity_label,
-            presentation_hints=query_ctx.presentation_hints,
+            presentation_hints=presentation_hints,
             conversation_context=conversation_context,
         )
     except Exception as pres_err:

@@ -129,7 +129,12 @@ def _build_union_cte(
 )"""
 
 
-def _topic_mention_array(field_aliases: list[str], topic_regex: str) -> str:
+def _topic_mention_array(
+    field_aliases: list[str],
+    topic_regex: str,
+    *,
+    topic_label: str | None = None,
+) -> str:
     parts: list[str] = []
     for alias in field_aliases:
         parts.append(
@@ -137,7 +142,7 @@ def _topic_mention_array(field_aliases: list[str], topic_regex: str) -> str:
             f"CONCAT('[{alias}] ', CAST({alias} AS STRING)), NULL)"
         )
     inner = ",\n                ".join(parts)
-    slug = re.sub(r"[^a-z0-9]+", "_", topic_regex)[:40].strip("_") or "topic"
+    slug = re.sub(r"[^a-z0-9]+", "_", (topic_label or topic_regex))[:40].strip("_") or "topic"
     return f"""ARRAY_TO_STRING(
     ARRAY(
       SELECT x FROM UNNEST([
@@ -174,10 +179,11 @@ def compose_topic_search_union(
     cte_names: list[str] = []
     for idx, (mid, mem_sem) in enumerate(members):
         cols = columns_by_table.get(mem_sem.full_table_id) or {d.id for d in mem_sem.dimensions}
-        cte_name = "src_" + mid.replace("nps_form_responses", "nps").replace("academy_", "a_")[:30]
-        cte_name = re.sub(r"[^a-z0-9_]", "_", cte_name.lower())
-        if idx == 0 and semantic.model_id == "nps_all_form_responses":
+        if semantic.model_id == "nps_all_form_responses":
             cte_name = "endorsed" if mid == "academy_nps_form_responses" else "old"
+        else:
+            cte_name = "src_" + mid.replace("nps_form_responses", "nps").replace("academy_", "a_")[:30]
+            cte_name = re.sub(r"[^a-z0-9_]", "_", cte_name.lower())
         ctes.append(_build_union_cte(cte_name, mem_sem.full_table_id, cols, align, idx, mid))
         cte_names.append(cte_name)
 
@@ -185,7 +191,7 @@ def compose_topic_search_union(
     for name in cte_names[1:]:
         union_body += f"\nUNION ALL\nSELECT * FROM {name}"
     concat_parts = " || ".join(f"COALESCE(CAST({a} AS STRING), '')" for a in text_aliases)
-    mention_expr = _topic_mention_array(text_aliases, topic_regex)
+    mention_expr = _topic_mention_array(text_aliases, topic_regex, topic_label=plan.topic)
 
     return f"""WITH {", ".join(ctes)},
 unioned AS (
@@ -287,6 +293,20 @@ def compose_aggregate(
     return compose_sql(mp, question, table_obj)
 
 
+def compose_compound(
+    plan: QueryPlan,
+    question: str,
+    tables: list[Any],
+) -> str | None:
+    from domain_sql import resolve_compound_domain_sql
+
+    pool = list(tables)
+    resolved = resolve_compound_domain_sql(question, pool)
+    if resolved:
+        return resolved[0]
+    return None
+
+
 def compose_query_plan(
     plan: QueryPlan,
     question: str,
@@ -297,6 +317,10 @@ def compose_query_plan(
 ) -> str | None:
     """Turn a QueryPlan into executable BigQuery SQL."""
     columns_by_table = columns_by_table or {}
+
+    if plan.intent == "compound":
+        return compose_compound(plan, question, catalog_tables or tables)
+
     semantic = semantic_by_model_id(plan.model_id)
     if not semantic:
         return None

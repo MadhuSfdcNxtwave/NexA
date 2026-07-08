@@ -82,10 +82,18 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
         score_penalty_shorts=("cloudwatch", "question_wise", "virtual_meet"),
     ),
     RoutingRule(
-        id="learning_portal_active",
-        table_short="z_ccbp_academy_users_master_data",
+        id="learning_portal_lp_status_active",
+        table_short="academy_users_day_and_page_wise_time_spent_details",
         question_re=_PORTAL,
-        reason="Learning portal access from user master data",
+        reason="Active learning portal users (lp_status = ACTIVE)",
+        filters=(SqlFilter("lp_status", "=", "ACTIVE"),),
+        score_penalty_shorts=("question_wise", "question_set", "master_data", "cloudwatch"),
+    ),
+    RoutingRule(
+        id="learning_portal_access_granted",
+        table_short="z_ccbp_academy_users_master_data",
+        question_re=_PORTAL_ACCESS,
+        reason="Users granted learning portal access (master profile)",
         filters=(
             SqlFilter("pause_status", "IS NULL"),
             SqlFilter("learning_portal_onboarding_access_given_datetime", "IS NOT NULL"),
