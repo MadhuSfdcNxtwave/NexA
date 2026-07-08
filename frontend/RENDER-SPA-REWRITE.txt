@@ -1,0 +1,8 @@
+# Render static site — SPA routing (React Router)
+#
+# In Render Dashboard → your static site → Redirects/Rewrites → Add Rule:
+#   Source:      /*
+#   Destination: /index.html
+#   Action:      Rewrite
+#
+# Without this, refreshing /threads/3 shows "Not Found".
