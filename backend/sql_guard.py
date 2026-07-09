@@ -129,7 +129,13 @@ def validate_sql(
         short_names = {t.full_table_id.rsplit(".", 1)[-1].lower() for t in selected_tables}
         referenced_short = {_short_table_name(t) for t in sql_tables}
         used_tables = referenced_short & short_names
-        if len(used_tables) > 1 and " join " not in blob and "\njoin " not in blob:
+        has_union = "union all" in blob
+        if (
+            len(used_tables) > 1
+            and " join " not in blob
+            and "\njoin " not in blob
+            and not has_union
+        ):
             issues.append(
                 "Query uses multiple tables — add JOIN with ON conditions from "
                 "# Join hints / JOIN knowledge base in the schema."

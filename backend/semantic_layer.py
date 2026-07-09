@@ -72,6 +72,13 @@ class UnionAlignDef:
 
 
 @dataclass
+class RelationDef:
+    target_model_id: str
+    rel_type: str = "many_to_one"
+    join_sql: str = ""
+
+
+@dataclass
 class TableSemantic:
     model_id: str
     full_table_id: str
@@ -81,6 +88,7 @@ class TableSemantic:
     grain: str = ""
     measures: list[MeasureDef] = field(default_factory=list)
     dimensions: list[DimensionDef] = field(default_factory=list)
+    relations: list[RelationDef] = field(default_factory=list)
     topic_columns: list[str] = field(default_factory=list)
     survey_wide: SurveyWideMeta | None = None
     survey_long: SurveyLongMeta | None = None
@@ -110,6 +118,19 @@ class TableSemantic:
         for d in self.dimensions:
             if d.id.lower() == key:
                 return d
+        return None
+
+    def has_dimension(self, dim_id: str) -> bool:
+        return self.dimension_by_id(dim_id) is not None
+
+    def relation_for_dimension(self, dim_id: str) -> RelationDef | None:
+        """Relation whose target model exposes dim_id (cross-table breakdown)."""
+        key = (dim_id or "").lower()
+        catalog = load_semantic_catalog()
+        for rel in self.relations:
+            target = catalog.get(rel.target_model_id.lower())
+            if target and target.has_dimension(key):
+                return rel
         return None
 
     def dim_sql(self, dim_id: str) -> str:
@@ -201,6 +222,26 @@ def _parse_dimensions(raw: Any) -> list[DimensionDef]:
                 dim_type=(d.get("type") or "").strip(),
                 expr_sql=(d.get("expr_sql") or "").strip(),
                 visibility=(d.get("visibility") or "public").strip(),
+            )
+        )
+    return out
+
+
+def _parse_relations(raw: Any) -> list[RelationDef]:
+    out: list[RelationDef] = []
+    if not isinstance(raw, list):
+        return out
+    for rel in raw:
+        if not isinstance(rel, dict):
+            continue
+        target = (rel.get("id") or "").strip()
+        if not target:
+            continue
+        out.append(
+            RelationDef(
+                target_model_id=target,
+                rel_type=(rel.get("type") or "many_to_one").strip(),
+                join_sql=(rel.get("join_sql") or "").strip(),
             )
         )
     return out
@@ -312,6 +353,7 @@ def _build_semantic(doc: dict[str, Any]) -> TableSemantic | None:
         grain=(doc.get("grain") or "").strip(),
         measures=_parse_measures(doc.get("measures")),
         dimensions=_parse_dimensions(doc.get("dimensions")),
+        relations=_parse_relations(doc.get("relations")),
         topic_columns=[str(c).strip() for c in topic_cols if str(c).strip()],
         survey_wide=survey_wide,
         survey_long=survey_long,

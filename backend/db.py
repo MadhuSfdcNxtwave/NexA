@@ -80,8 +80,30 @@ class SqlVerificationLog(Base):
     source: Mapped[str] = mapped_column(String(40), default="")
     llm_provider: Mapped[str] = mapped_column(String(40), default="")
     llm_model: Mapped[str] = mapped_column(String(120), default="")
+    result_row_count: Mapped[int | None] = mapped_column(default=None)
+    model_used: Mapped[str] = mapped_column(String(100), default="")
+    user_feedback: Mapped[str] = mapped_column(String(20), default="")
+    feedback_reason: Mapped[str] = mapped_column(String(100), default="")
+    issues_count: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class LearnedTemplate(Base):
+    """SQL patterns promoted from repeated successful verification logs."""
+    __tablename__ = "learned_templates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    trigger_question: Mapped[str] = mapped_column(Text, unique=True)
+    sql_template: Mapped[str] = mapped_column(Text)
+    expected_row_count: Mapped[int | None] = mapped_column(default=None)
+    promoted_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    use_count: Mapped[int] = mapped_column(default=0)
+    last_used_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 
@@ -783,6 +805,36 @@ def _migrate_standalone_threads() -> None:
                 conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
+def _migrate_sql_verification_logs() -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "sql_verification_logs" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("sql_verification_logs")}
+    alters: list[str] = []
+    if "result_row_count" not in existing:
+        alters.append("ALTER TABLE sql_verification_logs ADD COLUMN result_row_count INTEGER")
+    if "model_used" not in existing:
+        alters.append("ALTER TABLE sql_verification_logs ADD COLUMN model_used VARCHAR(100) DEFAULT ''")
+    if "user_feedback" not in existing:
+        alters.append("ALTER TABLE sql_verification_logs ADD COLUMN user_feedback VARCHAR(20) DEFAULT ''")
+    if "feedback_reason" not in existing:
+        alters.append("ALTER TABLE sql_verification_logs ADD COLUMN feedback_reason VARCHAR(100) DEFAULT ''")
+    if "issues_count" not in existing:
+        alters.append("ALTER TABLE sql_verification_logs ADD COLUMN issues_count INTEGER DEFAULT 0")
+    if not alters:
+        return
+    with engine.begin() as conn:
+        for stmt in alters:
+            conn.execute(text(stmt))
+
+
+def _migrate_learned_templates() -> None:
+    """learned_templates is created via create_all; no column migrations yet."""
+    _migrate_sql_verification_logs()
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
     _migrate_project_tables()
@@ -795,6 +847,7 @@ def init_db() -> None:
     _migrate_notebook()
     _migrate_workspace_tables()
     _migrate_workspace_settings()
+    _migrate_learned_templates()
     _sync_default_workspace_tables()
     _sync_workspace_from_default_dataset()
     from auth import bootstrap_admin

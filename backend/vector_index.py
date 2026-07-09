@@ -56,8 +56,15 @@ def table_document(knowledge: kb.TableKnowledge) -> str:
     """Stable compact card embedded once per table."""
     try:
         import kb_articles as kba
+        from semantic_layer import semantic_for_table
 
-        return kba.build_table_card(knowledge)[:3500]
+        base = kba.build_table_card(knowledge)[:3500]
+        sem = semantic_for_table(knowledge)
+        if sem and config.GLOSSARY_ENABLED:
+            from retrieval_service import enrich_table_document
+
+            return enrich_table_document(base, sem.model_id)
+        return base
     except Exception:
         pass
     lines = [
@@ -222,6 +229,8 @@ def rank_all_tables(
         vec = vector_scores.get(fq, 0.0)
         kn = kw_norm.get(fq, 0.0)
         score = vw * vec + kw_w * kn
+        if knowledge.endorsed:
+            score += config.ROUTING_ENDORSED_FUSION_BOOST
         fused.append(
             FusedMatch(
                 full_table_id=fq,

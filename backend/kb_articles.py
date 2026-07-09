@@ -197,13 +197,38 @@ def build_table_card(
 
     if sem and sem.measures:
         meas_parts = []
-        for m in sem.measures[:6]:
+        for m in sem.measures[:8]:
             part = f"{m.id} ({m.func}"
             if m.of_column:
                 part += f" `{m.of_column}`"
             part += ")"
+            if m.filters:
+                part += f" filters={','.join(m.filters)}"
+            if m.description:
+                part += f": {m.description[:80]}"
             meas_parts.append(part)
         lines.append("Measures: " + "; ".join(meas_parts))
+
+    if sem:
+        try:
+            from metrics_registry import glossary_snippets_for_model
+
+            snippets = glossary_snippets_for_model(sem.model_id)
+            if snippets:
+                lines.append("Glossary: " + " | ".join(snippets[:4]))
+        except Exception:
+            pass
+
+    if sem:
+        filter_dims = [
+            d for d in sem.dimensions
+            if d.expr_sql and (d.dim_type == "boolean" or "status" in d.id.lower())
+        ][:6]
+        if filter_dims:
+            lines.append(
+                "Filter rules: "
+                + "; ".join(f"{d.id}={d.expr_sql[:70]}" for d in filter_dims)
+            )
 
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()[:3500]
 

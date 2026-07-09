@@ -54,9 +54,63 @@ def extract_sql_from_text(text: str) -> str | None:
     return candidate.rstrip(";").strip()
 
 
+_SQL_RESUME_KW = (
+    "WHEN", "THEN", "ELSE", "END", "FROM", "JOIN", "GROUP", "ORDER",
+    "SELECT", "WITH", "ON", "INNER", "LEFT", "RIGHT", "CROSS", "UNION",
+    "LIMIT", "HAVING", "WHERE",
+)
+
+
+def _strip_inline_comments_before_keywords(sql: str) -> str:
+    """Drop ``-- comment`` segments when SQL continues on the same line."""
+    text = sql
+    for kw in _SQL_RESUME_KW:
+        text = re.sub(
+            rf"--[^\n\r]*?(?=\s+{kw}\b)",
+            " ",
+            text,
+            flags=re.I,
+        )
+    return text
+
+
+def strip_sql_line_comments(sql: str) -> str:
+    """Remove ``--`` line comments outside string literals.
+
+    LLMs often emit ``THEN 1 -- Promoter WHEN ...`` inside CASE expressions;
+    BigQuery treats the rest of the line as a comment and fails with
+    "Expected END after CASE".
+    """
+    text = _strip_inline_comments_before_keywords(sql or "")
+    if "--" not in text:
+        return text
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_single = in_double = False
+    while i < n:
+        ch = text[i]
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            out.append(ch)
+            i += 1
+            continue
+        if not in_single and not in_double and text.startswith("--", i):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def normalize_llm_sql(sql: str) -> str:
     """Fix common formatting glitches in LLM-generated SQL."""
-    text = (sql or "").strip()
+    text = strip_sql_line_comments((sql or "").strip())
     if not text:
         return text
     text = _GLUE_BEFORE_KW.sub(r"\1 ", text)
@@ -119,6 +173,9 @@ def column_names(expr: exp.Expression) -> set[str]:
         if name and name != "*":
             names.add(name)
     return names
+
+
+_SUBQUERY_ITERATORS = frozenset({"x", "t", "v", "val", "row", "item", "elem"})
 
 
 def defined_aliases(expr: exp.Expression) -> set[str]:
@@ -200,7 +257,9 @@ def validate_against_schema(
         # itself (Hex-style CTE SQL renames long columns to short aliases).
         permitted.update(defined_aliases(expr))
 
-        unknown = sorted(c for c in idents if c not in permitted)
+        unknown = sorted(
+            c for c in idents if c not in permitted and c not in _SUBQUERY_ITERATORS
+        )
         if unknown:
             if len(referenced) == 1:
                 fq = next(iter(referenced))

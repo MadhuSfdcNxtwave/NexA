@@ -81,6 +81,22 @@ def _column_hints_map(tables: list) -> dict[str, dict[str, str]]:
     return out
 
 
+def _workspace_columns_for_table(table: Any) -> set[str]:
+    """Column names from workspace_models.yaml when DB/BQ metadata is missing."""
+    from semantic_layer import semantic_for_table
+
+    sem = semantic_for_table(table)
+    if not sem:
+        return set()
+    cols: set[str] = set()
+    for dim in sem.dimensions:
+        cols.add(dim.id.lower())
+    for measure in sem.measures:
+        if measure.of_column:
+            cols.add(measure.of_column.lower())
+    return cols
+
+
 def _infer_hints_for_tables(
     tables: list,
 ) -> tuple[dict[str, dict[str, str]], dict[str, set[str]]]:
@@ -194,6 +210,7 @@ def _routing_meta(
     routing_reason: str = "",
     probe_stats: str = "",
     sql_source: str = "",
+    model_used: str = "",
 ) -> dict[str, Any]:
     tables = selected or []
     if plan is not None:
@@ -218,6 +235,8 @@ def _routing_meta(
         out["probe_stats"] = probe_stats
     if sql_source:
         out["sql_source"] = sql_source
+    if model_used:
+        out["model_used"] = model_used
     return out
 
 
@@ -486,7 +505,46 @@ def _try_feedback_template_sql(
     return sql
 
 
-def _try_planner_sql(
+def _planner_tables_for_plan(
+    plan,
+    selected_tables: list,
+    pool: list,
+    columns_by_table: dict[str, set[str]],
+) -> tuple[list, dict[str, set[str]]]:
+    """Expand selected tables + column map for union member models (even if not in workspace)."""
+    from types import SimpleNamespace
+
+    from semantic_layer import semantic_by_model_id
+
+    planner_tables = list(selected_tables)
+    cols = dict(columns_by_table or {})
+    pool_fqs = {getattr(t, "full_table_id", "") for t in pool}
+    member_ids = list(getattr(plan, "union_member_ids", None) or [])
+    for mid in member_ids:
+        sem = semantic_by_model_id(mid)
+        if not sem or not sem.full_table_id:
+            continue
+        fq = sem.full_table_id
+        if fq not in cols:
+            cols[fq] = {d.id for d in sem.dimensions}
+        found = next((t for t in planner_tables if getattr(t, "full_table_id", "") == fq), None)
+        if found:
+            continue
+        if fq in pool_fqs:
+            planner_tables.append(next(t for t in pool if t.full_table_id == fq))
+        else:
+            planner_tables.append(
+                SimpleNamespace(
+                    full_table_id=fq,
+                    column_hints_json="{}",
+                    column_descriptions_json="{}",
+                    ai_profile_json="{}",
+                )
+            )
+    return planner_tables, cols
+
+
+def _try_join_template_sql(
     question: str,
     selected_tables: list,
     hints_map: dict,
@@ -496,22 +554,133 @@ def _try_planner_sql(
     catalog_tables: list | None = None,
     schema_entities: list | None = None,
 ) -> tuple[str | None, str, list | None]:
+    """Deterministic JOIN SQL for cross-table breakdowns (state, gender, etc.)."""
+    from domain_sql import _join_template_table
+    from join_compose import _find_table, try_compose_join_sql
+    from memory_lookup import sql_matches_question_intent
+
+    pool = list(catalog_tables or selected_tables)
+    raw = try_compose_join_sql(question, pool)
+    if not raw:
+        return None, "", None
+    try:
+        sql = bq.validate_select_only(raw)
+    except ValueError:
+        return None, "", None
+    if not sql_matches_question_intent(question, sql, schema_entities=schema_entities):
+        return None, "", None
+
+    tables_for_val: list = []
+    primary = _join_template_table(question, pool)
+    master = _find_table(pool, "master_data")
+    profile = _find_table(pool, "profile_basic_details")
+    if primary:
+        tables_for_val.append(primary)
+    if profile and profile not in tables_for_val:
+        tables_for_val.append(profile)
+    elif master and master not in tables_for_val:
+        tables_for_val.append(master)
+    if not tables_for_val:
+        tables_for_val = list(selected_tables)
+
+    val_hints = _column_hints_map(tables_for_val)
+    val_inferred, val_cols = _infer_hints_for_tables(tables_for_val)
+    merged_cols = dict(columns_by_table or {})
+    merged_cols.update(val_cols)
+    for t in tables_for_val:
+        fq = t.full_table_id
+        ws_cols = _workspace_columns_for_table(t)
+        if ws_cols:
+            merged_cols.setdefault(fq, set()).update(ws_cols)
+    violations = validate_sql(
+        sql,
+        question,
+        tables_for_val,
+        val_hints,
+        val_inferred,
+        columns_by_table=merged_cols,
+    )
+    if violations:
+        return None, "", None
+    reason = "Join template SQL"
+    from debug_session import ask_trace
+
+    ask_trace(
+        "join_template_sql",
+        question=question[:200],
+        hit=True,
+        sql_preview=(sql or "")[:300],
+    )
+    return sql, reason, tables_for_val
+
+
+def _try_rag_compose_sql(
+    question: str,
+    selected_tables: list,
+    hints_map: dict,
+    inferred: dict,
+    columns_by_table: dict[str, set[str]],
+    *,
+    catalog_tables: list | None = None,
+    schema_entities: list | None = None,
+    query_plan=None,
+) -> tuple[str | None, str, list | None, Any | None]:
+    """Universal RAG path: glossary resolve → compose SQL → validate (no LLM)."""
+    from rag_pipeline import try_rag_compose_sql
+
+    sql, reason, tables, plan, resolved = try_rag_compose_sql(
+        question,
+        selected_tables,
+        hints_map,
+        inferred,
+        columns_by_table,
+        catalog_tables=catalog_tables,
+        schema_entities=schema_entities,
+        query_plan=query_plan,
+    )
+    if not sql:
+        return None, reason or "", None, plan
+    from debug_session import ask_trace
+
+    ask_trace(
+        "rag_compose",
+        question=question[:200],
+        hit=True,
+        reason=(reason or "")[:200],
+        sql_preview=(sql or "")[:300],
+        resolved=resolved.to_trace_dict() if resolved else {},
+        plan=plan.to_trace_dict() if plan else {},
+    )
+    return sql, reason, tables, plan
+
+
+def _try_planner_sql(
+    question: str,
+    selected_tables: list,
+    hints_map: dict,
+    inferred: dict,
+    columns_by_table: dict[str, set[str]],
+    *,
+    catalog_tables: list | None = None,
+    schema_entities: list | None = None,
+    query_plan=None,
+) -> tuple[str | None, str, list | None, Any | None]:
     """Model-facing query planner — topic search, survey distribution, aggregates."""
     if not config.HEX_STYLE_PIPELINE:
-        return None, "", None
+        return None, "", None, None
     from memory_lookup import sql_matches_question_intent
     from query_compose import compose_query_plan
-    from query_planner import try_build_query_plan
+    from query_planner import analyze_question
 
     pool = catalog_tables or selected_tables
-    plan = try_build_query_plan(
+    plan = query_plan or analyze_question(
         question,
         selected_tables,
         catalog_tables=pool,
         columns_by_table=columns_by_table,
     )
     if not plan:
-        return None, "", None
+        return None, "", None, None
     raw = compose_query_plan(
         plan,
         question,
@@ -520,35 +689,65 @@ def _try_planner_sql(
         catalog_tables=pool,
     )
     if not raw:
-        return None, plan.reason, None
+        return None, plan.reason, None, plan
+    planner_tables, planner_cols = _planner_tables_for_plan(
+        plan, selected_tables, pool, columns_by_table
+    )
     try:
         sql = bq.validate_select_only(raw)
     except ValueError:
-        return None, plan.reason, None
-    if not sql_matches_question_intent(question, sql, schema_entities=schema_entities):
-        return None, plan.reason, None
+        return None, plan.reason, None, plan
+    if not sql_matches_question_intent(
+        question,
+        sql,
+        schema_entities=schema_entities,
+        query_plan=plan,
+    ):
+        from debug_session import ask_trace
+
+        ask_trace(
+            "planner_sql",
+            question=question[:200],
+            hit=False,
+            reason="intent_mismatch",
+            sql_preview=(sql or "")[:300],
+            plan=plan.to_trace_dict(),
+        )
+        return None, plan.reason, None, plan
+    planner_hints = _column_hints_map(planner_tables)
+    planner_inferred, _ = _infer_hints_for_tables(planner_tables)
     violations = validate_sql(
         sql,
         question,
-        selected_tables,
-        hints_map,
-        inferred,
-        columns_by_table=columns_by_table,
+        planner_tables,
+        planner_hints,
+        planner_inferred,
+        columns_by_table=planner_cols,
     )
     if violations:
-        return None, plan.reason, None
-    planner_tables = list(selected_tables)
-    if plan.union_member_ids:
-        from semantic_layer import semantic_by_model_id
+        from debug_session import ask_trace
 
-        for mid in plan.union_member_ids:
-            sem = semantic_by_model_id(mid)
-            if not sem or not sem.full_table_id:
-                continue
-            for t in pool:
-                if t.full_table_id == sem.full_table_id and t not in planner_tables:
-                    planner_tables.append(t)
-    return sql, plan.reason, planner_tables or None
+        ask_trace(
+            "planner_sql",
+            question=question[:200],
+            hit=False,
+            reason="validation",
+            issues=violations[:5],
+            sql_preview=(sql or "")[:300],
+            plan=plan.to_trace_dict(),
+        )
+        return None, plan.reason, None, plan
+    from debug_session import ask_trace
+
+    ask_trace(
+        "planner_sql",
+        question=question[:200],
+        hit=True,
+        reason=plan.reason[:200] if plan.reason else "",
+        sql_preview=(sql or "")[:300],
+        plan=plan.to_trace_dict(),
+    )
+    return sql, plan.reason, planner_tables or None, plan
 
 
 def _try_semantic_template_sql(
@@ -934,6 +1133,7 @@ def _iter_validated_sql(
     audit: SqlAuditContext | None = None,
     source: str = "llm",
     table_catalog: dict[str, str] | None = None,
+    sql_model: str | None = None,
 ) -> Iterator[tuple[dict[str, Any] | None, str | None]]:
     """Yield (event|None, sql). Last yield has sql set.
 
@@ -964,6 +1164,11 @@ def _iter_validated_sql(
 
         # Escalate temperature on later retries so the model explores new shapes
         # instead of regenerating the same failing query.
+        from agents.pipeline_bridge import agents_enabled
+        from config_models import provider_for_model
+
+        gen_model = sql_model
+        gen_provider = provider_for_model(gen_model) if gen_model else None
         raw_sql = llm.question_to_sql(
             question,
             schema_text,
@@ -972,6 +1177,8 @@ def _iter_validated_sql(
             chain_context=chain_context,
             sql_entity_hint=sql_entity_hint,
             temperature=0.0 if attempt <= 2 else 0.2,
+            model=gen_model,
+            provider=gen_provider,
         )
         try:
             sql = bq.validate_select_only(_repair_unbalanced_parens(raw_sql))
@@ -1047,53 +1254,54 @@ def _iter_validated_sql(
 
         from memory_lookup import sql_intent_mismatch_reason
 
-        intent_reason = sql_intent_mismatch_reason(
-            question, sql, schema_entities=schema_entities
-        )
-        if intent_reason:
-            stale_rounds += 1
-            prior = f"SQL does not match the question intent: {intent_reason} Regenerate the full query."
-            log_sql_verification(
-                audit,
-                question=question,
-                sql=sql,
-                attempt=attempt,
-                phase="intent",
-                passed=False,
-                issues=[prior],
-                source=source,
+        if not agents_enabled():
+            intent_reason = sql_intent_mismatch_reason(
+                question, sql, schema_entities=schema_entities
             )
-            if attempt >= base_attempts and stale_rounds >= stale_limit:
-                break
-            continue
-
-        if config.SQL_VERIFY_WITH_LLM:
-            vlabel = _validation_label(question)
-            yield {
-                "type": "validating_sql",
-                "message": f"Validating «{vlabel}» SQL query…",
-                "label": vlabel,
-            }, None
-            review = llm_review_sql(
-                question,
-                sql,
-                schema_text,
-                project_context,
-                audit=audit,
-                attempt=attempt,
-                source=source,
-            )
-            if not review["pass"] and review["issues"]:
-                score = len(review["issues"]) * 10
-                if score < prev_violation_score:
-                    prev_violation_score = score
-                    stale_rounds = 0
-                else:
-                    stale_rounds += 1
-                prior = "SQL review failed:\n- " + "\n- ".join(review["issues"])
+            if intent_reason:
+                stale_rounds += 1
+                prior = f"SQL does not match the question intent: {intent_reason} Regenerate the full query."
+                log_sql_verification(
+                    audit,
+                    question=question,
+                    sql=sql,
+                    attempt=attempt,
+                    phase="intent",
+                    passed=False,
+                    issues=[prior],
+                    source=source,
+                )
                 if attempt >= base_attempts and stale_rounds >= stale_limit:
                     break
                 continue
+
+            if config.SQL_VERIFY_WITH_LLM:
+                vlabel = _validation_label(question)
+                yield {
+                    "type": "validating_sql",
+                    "message": f"Validating «{vlabel}» SQL query…",
+                    "label": vlabel,
+                }, None
+                review = llm_review_sql(
+                    question,
+                    sql,
+                    schema_text,
+                    project_context,
+                    audit=audit,
+                    attempt=attempt,
+                    source=source,
+                )
+                if not review["pass"] and review["issues"]:
+                    score = len(review["issues"]) * 10
+                    if score < prev_violation_score:
+                        prev_violation_score = score
+                        stale_rounds = 0
+                    else:
+                        stale_rounds += 1
+                    prior = "SQL review failed:\n- " + "\n- ".join(review["issues"])
+                    if attempt >= base_attempts and stale_rounds >= stale_limit:
+                        break
+                    continue
 
         # Final gate: BigQuery itself validates the query (dry-run costs nothing).
         # Catches unknown columns, type mismatches, and function errors that
@@ -1174,26 +1382,58 @@ def _iter_chain_sql(
         chain_context = format_prior_steps(completed)
 
         sql = None
-        for event, candidate in _iter_validated_sql(
-            step_q,
-            schema_text,
-            project_context,
+        from notebook_step_sql import compose_notebook_step_sql
+
+        composed, compose_reason = compose_notebook_step_sql(
+            step,
+            question,
             selected_tables,
             hints_map,
             inferred,
             columns_by_table,
-            chain_context=chain_context,
-            step_label=label,
-            sql_entity_hint=sql_entity_hint,
+            catalog_tables=selected_tables,
             schema_entities=schema_entities,
-            audit=audit,
-            source="chain",
-            table_catalog=table_catalog,
-        ):
-            if event:
-                yield event, None
-            if candidate:
-                sql = candidate
+        )
+        if not composed:
+            from chain_pipeline import try_compose_chain_step_sql
+
+            composed, compose_reason = try_compose_chain_step_sql(
+                step_q,
+                selected_tables,
+                hints_map,
+                inferred,
+                columns_by_table,
+                catalog_tables=selected_tables,
+                schema_entities=schema_entities,
+            )
+        if composed:
+            sql = composed
+            yield {
+                "type": "status",
+                "message": f"Chain step {idx}/{total}: composed SQL ({compose_reason[:60]})",
+            }, None
+
+        if not sql:
+            for event, candidate in _iter_validated_sql(
+                step_q,
+                schema_text,
+                project_context,
+                selected_tables,
+                hints_map,
+                inferred,
+                columns_by_table,
+                chain_context=chain_context,
+                step_label=label,
+                sql_entity_hint=sql_entity_hint,
+                schema_entities=schema_entities,
+                audit=audit,
+                source="chain",
+                table_catalog=table_catalog,
+            ):
+                if event:
+                    yield event, None
+                if candidate:
+                    sql = candidate
         if not sql:
             raise ValueError(f"SQL generation failed for chain step: {label}")
 
@@ -1230,10 +1470,11 @@ def iter_ask(
     clarification_choice: str | None = None,
     clarification_text: str | None = None,
     refined_question: str | None = None,
+    pinned_table_ids: list[str] | None = None,
     audit: SqlAuditContext | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield progress events, then a final complete event with the ask result."""
-    from ask_clarify import apply_clarification, build_clarification
+    from ask_clarify import apply_clarification, build_clarification, should_clarify_before_sql
     from debug_session import ask_trace, debug_log
 
     pipeline_started = time.monotonic()
@@ -1281,11 +1522,15 @@ def iter_ask(
 
     prior_q = (prior_entry or {}).get("question") or ""
     prior_sql = (prior_entry or {}).get("sql") or ""
-    from question_intent import expand_breakdown_followup
+    from question_intent import expand_breakdown_followup, expand_drill_down_followup
 
     expanded_question = expand_breakdown_followup(
         original_question, prior_q, prior_sql
     )
+    if expanded_question == original_question.strip():
+        expanded_question = expand_drill_down_followup(
+            original_question, prior_q, prior_sql
+        )
     if expanded_question != original_question.strip():
         question = expanded_question
 
@@ -1296,6 +1541,23 @@ def iter_ask(
     )
     question = query_ctx.question
     yield {"type": "status", "message": query_ctx.understanding_message}
+
+    resolved_pins = list(pinned_table_ids or [])
+    pin_reason = ""
+    if resolved_pins or "@" in question:
+        from table_mentions import apply_table_pins
+
+        cleaned, resolved_pins, pin_reason = apply_table_pins(
+            question,
+            included_tables,
+            pinned_table_ids=resolved_pins,
+        )
+        if resolved_pins:
+            if cleaned and cleaned != question:
+                question = cleaned
+                query_ctx.question = cleaned
+            if pin_reason:
+                yield {"type": "status", "message": pin_reason}
 
     from project_context import build_thread_conversation_context, merge_ask_context
 
@@ -1455,6 +1717,21 @@ def iter_ask(
             yield {"type": "complete", **_complete_payload(complete)}
             return
 
+    if intent == "knowledge_query":
+        from metrics_registry import glossary_context_for_question
+
+        yield {"type": "status", "message": "Explaining…"}
+        glossary_ctx, _ = glossary_context_for_question(question)
+        analysis = llm.knowledge_reply(question, glossary_ctx, project_context)
+        complete = _assistant_complete(
+            question,
+            analysis,
+            response_mode="knowledge",
+            schema_text="",
+        )
+        yield {"type": "complete", **_complete_payload(complete)}
+        return
+
     if intent == "assistant":
         yield {"type": "status", "message": "Thinking…"}
         analysis = llm.assistant_reply(question, project_context)
@@ -1468,7 +1745,11 @@ def iter_ask(
         return
 
     plan = build_ask_plan(
-        question, included_tables, join_hints, prior_sql=prior_sql
+        question,
+        included_tables,
+        join_hints,
+        prior_sql=prior_sql,
+        user_table_pins=resolved_pins or None,
     )
     ask_trace(
         "table_plan",
@@ -1521,6 +1802,33 @@ def iter_ask(
     from ask_context import enrich_query_context
 
     query_ctx = enrich_query_context(query_ctx, selected, columns_by_table)
+
+    query_plan = None
+    if config.HEX_STYLE_PIPELINE:
+        from query_planner import analyze_question
+
+        query_plan = analyze_question(
+            question,
+            selected,
+            catalog_tables=included_tables,
+            columns_by_table=columns_by_table,
+        )
+        ask_trace(
+            "intent_plan",
+            question=question[:200],
+            hit=bool(query_plan),
+            plan=query_plan.to_trace_dict() if query_plan else {},
+        )
+
+    if not preapproved_sql and not has_clarification:
+        pre_clar = should_clarify_before_sql(
+            question,
+            selected_table_shorts=[_short(t.full_table_id) for t in selected],
+            has_clarification=has_clarification,
+        )
+        if pre_clar:
+            yield {"type": "awaiting_clarification", **pre_clar}
+            return
 
     knowledges = [kb.load_table_knowledge(t) for t in selected]
     column_matches: dict[str, list[kb.ColumnMatch]] = {}
@@ -1608,6 +1916,47 @@ def iter_ask(
     from question_dates import build_date_hints
 
     date_hints = build_date_hints(question, selected)
+    compact_context = ""
+    rag_result = None
+    if config.HEX_STYLE_PIPELINE and query_plan:
+        if config.GLOSSARY_ENABLED:
+            from rag_context import build_rag_context
+            from retrieval_service import retrieve
+            from term_resolver import resolve as resolve_terms
+
+            resolved = resolve_terms(
+                question,
+                selected,
+                catalog_tables=included_tables,
+                columns_by_table=columns_by_table,
+            )
+            rag_result = retrieve(
+                question,
+                included_tables,
+                resolved=resolved,
+            )
+            compact_context = build_rag_context(
+                rag_result,
+                selected_tables=selected,
+                date_hints=date_hints,
+                join_block=join_block,
+                thread_memory=project_context[:1200] if project_context else "",
+            )
+            ask_trace(
+                "rag_retrieval",
+                question=question[:200],
+                **rag_result.to_trace_dict(),
+            )
+        else:
+            from context_builder import build_model_context
+
+            compact_context = build_model_context(
+                query_plan,
+                selected_tables=selected,
+                date_hints=date_hints,
+                join_block=join_block,
+                thread_memory=project_context[:1200] if project_context else "",
+            )
     if date_hints:
         schema_text += "\n\n" + date_hints
     if join_block:
@@ -1626,6 +1975,21 @@ def iter_ask(
 
         schema_text = enrich_schema_with_measures(schema_text, selected[0])
     schema_text = _compact_schema_text(schema_text, num_tables=len(selected))
+
+    from agents.pipeline_bridge import (
+        agents_enabled,
+        business_rules_block,
+        critic_validate_and_fix,
+        enrich_schema_context,
+        sql_model_for_question,
+        try_learned_pattern,
+    )
+
+    schema_text = enrich_schema_context([t.full_table_id for t in selected], schema_text)
+    rules_block = business_rules_block(question)
+    if rules_block:
+        schema_text += "\n\n" + rules_block
+    model_used = sql_model_for_question(question) if agents_enabled() else config.FETCH_MODEL
 
     routing_meta = _routing_meta(plan=plan, selected=selected)
     sql_source = ""
@@ -1652,15 +2016,32 @@ def iter_ask(
         chain_plan: list[dict[str, str]] = []
         from domain_sql import is_domain_question, resolve_domain_sql
 
-        domain_resolved = resolve_domain_sql(question, included_tables)
+        if not config.HEX_STYLE_PIPELINE:
+            domain_resolved = resolve_domain_sql(question, included_tables)
+
         if config.HEX_STYLE_PIPELINE and not domain_resolved:
-            if not is_domain_question(question, included_tables):
+            from notebook_planner import plan_notebook_steps
+
+            skip_chain = bool(
+                query_plan
+                and query_plan.intent in ("topic_search", "survey_distribution")
+            )
+            if (
+                not skip_chain
+                and config.SQL_CHAIN_ENABLED
+                and not is_domain_question(question, included_tables)
+            ):
                 yield {
                     "type": "status",
-                    "message": "Checking if this needs multiple SQL steps…",
+                    "message": "Planning notebook SQL cells…",
                 }
-                chain_plan = plan_steps(
-                    question, schema_text, max_steps=config.SQL_CHAIN_MAX_STEPS
+                chain_plan = plan_notebook_steps(
+                    question,
+                    schema_text,
+                    selected_tables=selected,
+                    query_plan=query_plan,
+                    join_relations=plan.join_relations,
+                    max_steps=config.SQL_CHAIN_MAX_STEPS,
                 )
 
         if domain_resolved:
@@ -1690,7 +2071,7 @@ def iter_ask(
                     yield {
                         "type": "chain_plan",
                         "steps": chain_plan,
-                        "message": f"Breaking into {len(chain_plan)} SQL steps…",
+                        "message": f"Generating {len(chain_plan)} notebook SQL cells…",
                     }
                     executed: list[dict[str, Any]] | None = None
                     for event, done in _iter_chain_sql(
@@ -1758,25 +2139,221 @@ def iter_ask(
 
                 clar_payload = None
                 semantic_reason = ""
-                template_sql, semantic_reason, semantic_tables = _try_planner_sql(
-                    question,
-                    selected,
-                    hints_map,
-                    inferred,
-                    columns_by_table,
-                    catalog_tables=included_tables,
-                    schema_entities=query_ctx.schema_entities,
-                )
-                sql_source = "planner" if template_sql else sql_source
+                planner_plan = query_plan
+                template_sql = None
+                semantic_tables = None
+
+                # Temp query agent — plan complex / high-risk questions before planner.
+                if not has_clarification:
+                    from agents.temp_agent_bridge import try_temp_agent_sql
+
+                    agent_sql, agent_reason, agent_clar = try_temp_agent_sql(
+                        question,
+                        list(included_tables or selected),
+                        columns_by_table,
+                        prior_sql=prior_sql,
+                    )
+                    if agent_clar:
+                        yield {
+                            "type": "awaiting_clarification",
+                            "prompt": agent_clar.get("prompt") or "Which interpretation?",
+                            "options": agent_clar.get("options") or [],
+                            "allow_custom": agent_clar.get("allow_custom", True),
+                            "confirm_mode": agent_clar.get("confirm_mode", True),
+                            "question": original_question,
+                            "reasons": [agent_reason] if agent_reason else ["temp_agent"],
+                        }
+                        return
+                    if agent_sql:
+                        try:
+                            template_sql = bq.validate_select_only(agent_sql)
+                            sql_source = "temp_agent"
+                            semantic_reason = agent_reason or "Temp query agent"
+                            ask_trace(
+                                "temp_agent_sql",
+                                question=question[:200],
+                                hit=True,
+                                reason=(semantic_reason or "")[:200],
+                                sql_preview=(template_sql or "")[:300],
+                            )
+                        except ValueError:
+                            template_sql = None
+
+                # Drill-down: rewrite prior COUNT → SELECT DISTINCT user_id (same WHERE).
+                if not template_sql and prior_sql and not has_clarification:
+                    from question_intent import (
+                        is_drill_down_data_request,
+                        rewrite_aggregate_to_user_list_sql,
+                    )
+
+                    if is_drill_down_data_request(original_question) or is_drill_down_data_request(
+                        question
+                    ):
+                        drill_sql = rewrite_aggregate_to_user_list_sql(prior_sql)
+                        if drill_sql:
+                            try:
+                                template_sql = bq.validate_select_only(drill_sql)
+                                sql_source = "drill_down"
+                                semantic_reason = (
+                                    "Drill-down — listing user_id with prior filters"
+                                )
+                                ask_trace(
+                                    "drill_down_sql",
+                                    question=original_question[:200],
+                                    hit=True,
+                                    sql_preview=(template_sql or "")[:300],
+                                )
+                            except ValueError:
+                                template_sql = None
+
+                if not template_sql and config.GLOSSARY_ENABLED and config.HEX_STYLE_PIPELINE:
+                    template_sql, semantic_reason, semantic_tables, planner_plan = (
+                        _try_rag_compose_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            catalog_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                            query_plan=query_plan,
+                        )
+                    )
+                    if template_sql:
+                        sql_source = "rag"
+                        query_plan = planner_plan or query_plan
+                # NPS templates must run in hex mode too — planner often picks unique_responders.
                 if not template_sql:
-                    template_sql, semantic_reason, semantic_tables = _try_semantic_template_sql(
+                    from nps_sql import is_nps_analytics_question
+
+                    if is_nps_analytics_question(question) or re.search(
+                        r"\bnps\b", question, re.I
+                    ):
+                        nps_sql = _try_nps_template_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            included_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                        )
+                        if nps_sql:
+                            template_sql = nps_sql
+                            semantic_reason = "NPS template SQL"
+                            sql_source = "nps_template"
+                pattern_match = try_learned_pattern(question)
+                if not template_sql and pattern_match:
+                    template_sql = pattern_match.sql
+                    sql_source = "template"
+                    semantic_reason = (
+                        f"Learned pattern ({pattern_match.source}, score={pattern_match.score})"
+                    )
+                    if pattern_match.template_id and audit and audit.db:
+                        from agents.pattern_miner import get_pattern_miner
+
+                        get_pattern_miner().record_template_use(
+                            audit.db, pattern_match.template_id
+                        )
+                if not template_sql and not (config.GLOSSARY_ENABLED and config.HEX_STYLE_PIPELINE):
+                    template_sql, semantic_reason, semantic_tables = _try_join_template_sql(
                         question,
                         selected,
                         hints_map,
                         inferred,
                         columns_by_table,
                         catalog_tables=included_tables,
+                        schema_entities=query_ctx.schema_entities,
                     )
+                    if template_sql:
+                        sql_source = "join_template"
+                    if not template_sql:
+                        nps_sql = _try_nps_template_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            included_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                        )
+                        if nps_sql:
+                            template_sql = nps_sql
+                            semantic_reason = "NPS template SQL"
+                            sql_source = "nps_template"
+                    if not template_sql:
+                        template_sql, semantic_reason, semantic_tables, planner_plan = (
+                            _try_planner_sql(
+                                question,
+                                selected,
+                                hints_map,
+                                inferred,
+                                columns_by_table,
+                                catalog_tables=included_tables,
+                                schema_entities=query_ctx.schema_entities,
+                                query_plan=query_plan,
+                            )
+                        )
+                        if template_sql:
+                            sql_source = "planner"
+                    if planner_plan:
+                        query_plan = planner_plan
+                    if not template_sql:
+                        from nps_sql import is_nps_analytics_question
+
+                        if not is_nps_analytics_question(question):
+                            template_sql, semantic_reason, semantic_tables = (
+                                _try_semantic_template_sql(
+                                    question,
+                                    selected,
+                                    hints_map,
+                                    inferred,
+                                    columns_by_table,
+                                    catalog_tables=included_tables,
+                                )
+                            )
+                            if template_sql:
+                                sql_source = "semantic"
+                    if not template_sql:
+                        domain_resolved = resolve_domain_sql(question, included_tables)
+                        if domain_resolved:
+                            template_sql, domain_table, domain_reason = domain_resolved
+                            semantic_tables = [domain_table]
+                            semantic_reason = domain_reason
+                            sql_source = "domain"
+                            ask_trace(
+                                "domain_sql",
+                                question=question[:200],
+                                hit=True,
+                                reason=domain_reason,
+                                sql_preview=(template_sql or "")[:300],
+                                plan=query_plan.to_trace_dict() if query_plan else {},
+                            )
+                elif not template_sql and config.GLOSSARY_ENABLED and config.HEX_STYLE_PIPELINE:
+                    # Hex path: still try planner/domain after NPS
+                    template_sql, semantic_reason, semantic_tables, planner_plan = (
+                        _try_planner_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            catalog_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                            query_plan=query_plan,
+                        )
+                    )
+                    if template_sql:
+                        sql_source = "planner"
+                    if planner_plan:
+                        query_plan = planner_plan
+                    if not template_sql:
+                        domain_resolved = resolve_domain_sql(question, included_tables)
+                        if domain_resolved:
+                            template_sql, domain_table, domain_reason = domain_resolved
+                            semantic_tables = [domain_table]
+                            semantic_reason = domain_reason
+                            sql_source = "domain"
                 ask_trace(
                     "semantic_sql",
                     question=question[:200],
@@ -1785,21 +2362,18 @@ def iter_ask(
                     sql_preview=(template_sql or "")[:300],
                 )
                 if template_sql and semantic_tables:
-                    if sql_source != "planner":
+                    if sql_source not in (
+                        "planner",
+                        "join_template",
+                        "nps_template",
+                        "template",
+                        "rag",
+                    ):
                         sql_source = "semantic"
                     selected = semantic_tables
                     knowledges = [kb.load_table_knowledge(t) for t in selected]
                     hints_map = _column_hints_map(selected)
                     inferred, columns_by_table = _infer_hints_for_tables(selected)
-                if not template_sql:
-                    template_sql = _try_nps_template_sql(
-                        question,
-                        selected,
-                        hints_map,
-                        inferred,
-                        columns_by_table,
-                        included_tables=included_tables,
-                    )
                 if not template_sql and _is_feedback_question(question):
                     template_sql, clar_payload = _resolve_feedback_sql(
                         question,
@@ -1834,18 +2408,19 @@ def iter_ask(
                         prior_sql=prior_sql,
                     )
                 if template_sql:
-                    from memory_lookup import sql_matches_question_intent
-                    from nps_sql import is_nps_analytics_question
+                    from memory_lookup import sql_intent_mismatch_reason, sql_matches_question_intent
 
-                    skip_intent = is_nps_analytics_question(question) or sql_source in (
-                        "semantic",
-                        "domain",
-                        "planner",
-                    )
-                    if not skip_intent and not sql_matches_question_intent(
+                    intent_reason = sql_intent_mismatch_reason(
                         question,
                         template_sql,
                         schema_entities=query_ctx.schema_entities,
+                        query_plan=query_plan,
+                    )
+                    if intent_reason and not sql_matches_question_intent(
+                        question,
+                        template_sql,
+                        schema_entities=query_ctx.schema_entities,
+                        query_plan=query_plan,
                     ):
                         log_sql_verification(
                             audit,
@@ -1854,11 +2429,26 @@ def iter_ask(
                             attempt=1,
                             phase="intent",
                             passed=False,
-                            issues=["Template SQL does not match question intent."],
-                            source="template",
+                            issues=[intent_reason],
+                            source=sql_source or "template",
+                            plan=query_plan.to_trace_dict() if query_plan else None,
                         )
+                        if not has_clarification and config.ASK_CLARIFICATION_ENABLED:
+                            from ask_clarify import build_intent_clarification
+
+                            clar = build_intent_clarification(
+                                original_question,
+                                reason=intent_reason,
+                                sql=template_sql,
+                                selected_table_shorts=[
+                                    _short(t.full_table_id) for t in selected
+                                ],
+                            )
+                            if clar:
+                                yield {"type": "awaiting_clarification", **clar}
+                                return
                         template_sql = None
-                if template_sql and config.SQL_VERIFY_WITH_LLM:
+                if template_sql and config.SQL_VERIFY_WITH_LLM and sql_source != "planner" and not agents_enabled():
                     vlabel = _validation_label(question)
                     yield {
                         "type": "validating_sql",
@@ -1885,7 +2475,8 @@ def iter_ask(
                         phase="approved",
                         passed=True,
                         issues=[],
-                        source="semantic" if sql_source == "semantic" else "template",
+                        source=sql_source or "template",
+                        plan=query_plan.to_trace_dict() if query_plan else None,
                     )
                     yield {
                         "type": "sql_verified",
@@ -1905,9 +2496,14 @@ def iter_ask(
                     chain_steps = None
                 else:
                     sql = None
+                    llm_schema = (
+                        f"{compact_context}\n\n---\n\n{schema_text}"
+                        if compact_context
+                        else schema_text
+                    )
                     for event, candidate in _iter_validated_sql(
                         question,
-                        schema_text,
+                        llm_schema,
                         project_context,
                         selected,
                         hints_map,
@@ -1917,6 +2513,7 @@ def iter_ask(
                         schema_entities=query_ctx.schema_entities,
                         audit=audit,
                         table_catalog=catalog,
+                        sql_model=model_used,
                     ):
                         if event:
                             yield event
@@ -1926,12 +2523,35 @@ def iter_ask(
                 if not sql:
                     raise ValueError("SQL generation failed")
 
+                if agents_enabled():
+                    sql, critic_issues = critic_validate_and_fix(
+                        sql,
+                        question,
+                        schema_text,
+                        schema_entities=query_ctx.schema_entities,
+                        sql_source=sql_source or "",
+                    )
+                    if critic_issues:
+                        ask_trace(
+                            "query_critic",
+                            question=question[:200],
+                            issues=critic_issues[:6],
+                            sql_preview=(sql or "")[:300],
+                        )
+
                 ask_trace(
                     "sql_ready",
                     question=question[:200],
                     sql_source=sql_source or ("template" if template_sql else "llm"),
                     sql_preview=(sql or "")[:400],
+                    model=model_used,
                 )
+                yield {
+                    "type": "sql_ready",
+                    "sql": sql,
+                    "source": sql_source or "llm",
+                    "model": model_used,
+                }
 
                 if config.REQUIRE_SQL_APPROVAL:
                     yield {
@@ -1967,18 +2587,22 @@ def iter_ask(
                 else:
                     recovered_sql = None
                     if not has_clarification and config.ASK_CLARIFICATION_ENABLED:
-                        from nps_sql import is_nps_analytics_question
+                        if config.GLOSSARY_ENABLED and config.HEX_STYLE_PIPELINE:
+                            from rag_pipeline import try_rag_compose_sql
 
-                        if is_nps_analytics_question(original_question):
-                            recovered_sql = _try_nps_template_sql(
-                                question,
+                            recovered_sql, _, _, _, _ = try_rag_compose_sql(
+                                original_question,
                                 selected,
                                 hints_map,
                                 inferred,
                                 columns_by_table,
-                                included_tables=included_tables,
+                                catalog_tables=included_tables,
+                                schema_entities=query_ctx.schema_entities,
+                                query_plan=query_plan,
                             )
-                        elif not resolve_domain_sql(question, included_tables):
+                        if not recovered_sql and not resolve_domain_sql(
+                            question, included_tables
+                        ):
                             all_knowledges = [
                                 kb.load_table_knowledge(t) for t in included_tables
                             ]
@@ -2116,6 +2740,7 @@ def iter_ask(
 
     result_ok = True
     mismatch = ""
+    retry_fixed = False
     if sql_source == "domain":
         result_ok = True
     elif query_ctx.schema_entities:
@@ -2168,10 +2793,78 @@ def iter_ask(
                 rows = json.loads(df.to_json(orient="records", date_format="iso"))
                 columns = list(df.columns)
                 sample = rows[:50]
+                retry_fixed = True
+                if query_ctx.schema_entities:
+                    result_ok, mismatch = validate_result_for_question(
+                        question,
+                        sql or "",
+                        columns,
+                        rows,
+                        query_ctx.schema_entities,
+                    )
+                else:
+                    result_ok = sql_matches_question_intent(
+                        question, sql or "", schema_entities=None
+                    )
             except Exception:
                 pass
 
+        if not result_ok and not has_clarification and config.ASK_CLARIFICATION_ENABLED:
+            from ask_clarify import build_intent_clarification
+
+            clar = build_intent_clarification(
+                original_question,
+                reason=mismatch or "result_does_not_answer_question",
+                sql=sql or "",
+                selected_table_shorts=[_short(t.full_table_id) for t in selected],
+                force=True,
+            )
+            if clar:
+                yield {"type": "awaiting_clarification", **clar}
+                return
+
+        if not result_ok and not retry_fixed:
+            analysis = (
+                "I couldn't confidently answer your question with the available data. "
+                "The query I tried would not give you the breakdown or metric you asked for. "
+                "Please pick one of the clarifications below, or rephrase your question "
+                "with more detail (e.g. which dimension, date range, or activity type)."
+            )
+            yield {
+                "type": "complete",
+                **_complete_payload(
+                    {
+                        "question": display_question,
+                        "sql": sql or "",
+                        "columns": columns,
+                        "rows": [],
+                        "viz_rows": [],
+                        "chart_spec": {"chart": "none"},
+                        "analysis": analysis,
+                        "bytes_estimate": bytes_estimate,
+                        "from_cache": False,
+                        "response_mode": "clarify_needed",
+                        "needs_clarification": True,
+                    },
+                    schema_text=schema_text,
+                ),
+            }
+            return
+
     yield {"type": "analyzing", "message": "Preparing your results…"}
+    from metrics_registry import glossary_context_for_question
+
+    glossary_ctx, _ = glossary_context_for_question(question)
+    presentation_hints = list(query_ctx.presentation_hints)
+    if query_ctx.wants_breakdown or len(rows) > 1:
+        if not any("every part" in h.lower() for h in presentation_hints):
+            presentation_hints.append(
+                "Cover every part of the question: what happened, why it matters, "
+                "how to interpret the numbers, and any caveats."
+            )
+    query_reason = (query_plan.reason if query_plan else "") or ""
+    if query_plan and query_plan.viz_hint:
+        presentation_hints.append(f"viz_hint:{query_plan.viz_hint}")
     try:
         viz_rows, chart_spec, analysis = llm.build_presentation(
             question,
@@ -2180,8 +2873,10 @@ def iter_ask(
             sample=sample,
             sql=sql or "",
             entity_label=query_ctx.entity_label,
-            presentation_hints=query_ctx.presentation_hints,
+            presentation_hints=presentation_hints,
             conversation_context=conversation_context,
+            glossary_context=glossary_ctx,
+            query_reason=query_reason,
         )
     except Exception as pres_err:
         from presentation import heuristic_analyze, infer_chart_spec
@@ -2213,6 +2908,19 @@ def iter_ask(
         selected=selected,
         probe_stats=probe_stats,
         sql_source=sql_source,
+        model_used=model_used if agents_enabled() else "",
+    )
+    log_sql_verification(
+        audit,
+        question=question,
+        sql=sql or "",
+        attempt=1,
+        phase="execute",
+        passed=True,
+        issues=[],
+        source=sql_source or "llm",
+        result_row_count=len(rows),
+        model_used=model_used if agents_enabled() else config.FETCH_MODEL,
     )
     ask_trace(
         "ask_complete",
@@ -2223,6 +2931,7 @@ def iter_ask(
         worked_seconds=_elapsed(),
     )
 
+    yield {"type": "insight", "data": analysis}
     yield {
         "type": "complete",
         **_complete_payload(

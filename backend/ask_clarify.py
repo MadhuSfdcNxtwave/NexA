@@ -45,6 +45,16 @@ _RAW_TABLE_TOKEN = re.compile(
     re.I,
 )
 _TABLE_PICK_REASON = re.compile(r"^multiple_tables_compete", re.I)
+_PORTAL_ACTIVITY = re.compile(
+    r"\b(?:learning[\s_-]*portal|learningportal|portal)\b.{0,60}\b(activity|activit|page|events?|which)\b|"
+    r"\b(which|what)\b.{0,40}\b(activity|page)\b|"
+    r"\bin which activity\b|"
+    r"\bactiv(?:e|ly|lly)\s+in\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b|"
+    r"\bevents?\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b",
+    re.I,
+)
+_EVENT_ENGAGEMENT = re.compile(r"event_engagement|nw_events", re.I)
+_PORTAL_PAGE = re.compile(r"day_and_page|time_spent_page", re.I)
 
 
 def should_skip_clarification(
@@ -66,7 +76,11 @@ def should_skip_clarification(
     if re.search(r"\bactive\b", q, re.I) and re.search(
         r"\blearning[\s_-]*portal|\bportal\b", q, re.I
     ):
-        return True
+        # "Which activity on portal" needs disambiguation — don't auto-skip.
+        from question_intent import question_wants_breakdown
+
+        if not (_PORTAL_ACTIVITY.search(q) or question_wants_breakdown(q)):
+            return True
     if re.search(r"\bfeedback\b|\bemoji\b", q, re.I):
         return True
     if _CLEAR_DATA_QUESTION.search(q):
@@ -193,6 +207,176 @@ def apply_clarification(
     if clarification_text and clarification_text.strip():
         return f"{question.strip()} — User clarification: {clarification_text.strip()}"
     return question.strip()
+
+
+def _portal_activity_options(question: str) -> list[dict[str, str]]:
+    return [
+        {
+            "id": "portal_pages",
+            "label": "Portal pages students use (time spent per page)",
+            "refined_question": (
+                "Which learning portal pages are students actively using — "
+                "break down by page with active user counts"
+            ),
+        },
+        {
+            "id": "portal_events",
+            "label": "Events / webinars in the learning portal",
+            "refined_question": (
+                "Which events or webinars are students engaging with in the learning portal"
+            ),
+        },
+        {
+            "id": "portal_attendance",
+            "label": "Portal activity + live class attendance %",
+            "refined_question": (
+                "Learning portal page activity and live class attendance percentage by page"
+            ),
+        },
+    ]
+
+
+def _which_dimension_options(question: str, *, context: str = "") -> list[dict[str, str]]:
+    opts: list[dict[str, str]] = []
+    q = (question or "").lower()
+    if re.search(r"\bnps\b|score|rating", q):
+        opts.append(
+            {
+                "id": "nps_aspect",
+                "label": "Program aspects that drove higher NPS scores",
+                "refined_question": (
+                    "Which program aspects have the highest average NPS rating "
+                    "from form responses"
+                ),
+            }
+        )
+    if re.search(r"\bactivity|page|portal", q):
+        opts.extend(_portal_activity_options(question)[:2])
+    if not opts:
+        opts = [
+            {
+                "id": "breakdown",
+                "label": "Break down by category (GROUP BY)",
+                "refined_question": f"{question.strip()} — show breakdown by category, not total count",
+            },
+            {
+                "id": "total",
+                "label": "Total count only",
+                "refined_question": f"How many total records match: {question.strip()}",
+            },
+        ]
+    return opts[:4]
+
+
+def build_intent_clarification(
+    question: str,
+    *,
+    reason: str = "",
+    sql: str = "",
+    selected_table_shorts: list[str] | None = None,
+    force: bool = False,
+) -> dict[str, Any] | None:
+    """
+    Ask the user to confirm intent before returning wrong data.
+    Returns clarification payload or None when intent is clear enough.
+    """
+    if not config.ASK_CLARIFICATION_ENABLED:
+        return None
+
+    from question_intent import expand_question_abbreviations, question_wants_breakdown
+
+    q = expand_question_abbreviations((question or "").strip())
+    if not q:
+        return None
+
+    shorts = [s.lower() for s in (selected_table_shorts or [])]
+    options: list[dict[str, str]] = []
+    prompt = ""
+
+    # Portal activity routed to event engagement — wrong table for page breakdown.
+    if _PORTAL_ACTIVITY.search(q):
+        on_events = any(_EVENT_ENGAGEMENT.search(s) for s in shorts)
+        on_pages = any(_PORTAL_PAGE.search(s) for s in shorts)
+        wants_breakdown = question_wants_breakdown(q)
+        if wants_breakdown and on_events and not on_pages:
+            options = _portal_activity_options(q)
+            prompt = (
+                "Your question asks which activity on the learning portal. "
+                "That can mean portal pages students use, or events/webinars they attended. "
+                "Which did you mean?"
+            )
+        elif wants_breakdown and not on_pages and not on_events:
+            options = _portal_activity_options(q)
+            prompt = (
+                "I want to make sure I answer the right question. "
+                "Are you asking about portal pages, events, or both with attendance?"
+            )
+
+    # SQL is a scalar count but question asks which/what dimension.
+    if not options and reason:
+        low = reason.lower()
+        if "group by" in low or "which" in low or "breakdown" in low:
+            options = _which_dimension_options(q, context=reason)
+            prompt = (
+                "Your question asks for a breakdown, but I only have a total count. "
+                "Which interpretation should I use?"
+            )
+
+    if not options and force and reason:
+        options = _which_dimension_options(q, context=reason)
+        prompt = (
+            "I'm not confident I understood your question correctly. "
+            "Which of these matches what you're looking for?"
+        )
+
+    if len(options) < 2:
+        return None
+
+    cid = _clarification_id(question, options)
+    return {
+        "clarification_id": cid,
+        "prompt": prompt or "Which interpretation should I use?",
+        "question": question,
+        "options": options[:4],
+        "allow_custom": True,
+        "reasons": [reason] if reason else ["intent_ambiguous"],
+        "confirm_mode": True,
+    }
+
+
+def should_clarify_before_sql(
+    question: str,
+    *,
+    selected_table_shorts: list[str] | None = None,
+    has_clarification: bool = False,
+) -> dict[str, Any] | None:
+    """Pre-SQL gate — clarify ambiguous intent instead of guessing."""
+    if has_clarification:
+        return None
+    from question_intent import expand_question_abbreviations, question_wants_breakdown
+
+    q = expand_question_abbreviations((question or "").strip())
+    if not q:
+        return None
+
+    if _PORTAL_ACTIVITY.search(q) and question_wants_breakdown(q):
+        shorts = [s.lower() for s in (selected_table_shorts or [])]
+        on_events = any(_EVENT_ENGAGEMENT.search(s) for s in shorts)
+        on_pages = any(_PORTAL_PAGE.search(s) for s in shorts)
+        # Wrong table selected, or no page table available — ask before running SQL.
+        if on_events and not on_pages:
+            return build_intent_clarification(
+                question,
+                reason="portal_activity_wrong_table",
+                selected_table_shorts=selected_table_shorts,
+            )
+        if not on_pages:
+            return build_intent_clarification(
+                question,
+                reason="portal_activity_ambiguous",
+                selected_table_shorts=selected_table_shorts,
+            )
+    return None
 
 
 def clarification_from_discovery(

@@ -88,6 +88,18 @@ def _startup() -> None:
     threading.Thread(target=_backfill_ai_overviews, daemon=True).start()
     if config.EMBEDDING_AUTO_INDEX_ON_STARTUP:
         threading.Thread(target=_backfill_table_embeddings, daemon=True).start()
+    threading.Thread(target=_start_pattern_miner, daemon=True).start()
+
+
+def _start_pattern_miner() -> None:
+    from agents.pattern_miner import get_pattern_miner, start_pattern_miner_refresh_loop
+
+    try:
+        count = get_pattern_miner().refresh()
+        print(f"[pattern-miner] initial load: {count} patterns")
+    except Exception as exc:
+        print(f"[pattern-miner] initial load failed: {exc}")
+    start_pattern_miner_refresh_loop()
 
 
 def _backfill_ai_overviews() -> None:
@@ -372,6 +384,18 @@ def admin_sql_verification_logs(
             )
         )
     return out
+
+
+@app.post("/admin/promote-templates")
+def admin_promote_templates(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Promote frequently successful SQL patterns to learned templates."""
+    from agents.template_promoter import TemplatePromoterAgent
+
+    promoted = TemplatePromoterAgent().run_promotion_cycle(db)
+    return {"promoted": promoted, "count": len(promoted)}
 
 
 # --------------------------------------------------------------------------
@@ -738,6 +762,7 @@ def _ask_thread_stream_impl(body: schemas.AskRequest, thread_id: int, db: Sessio
                 clarification_choice=body.clarification_choice,
                 clarification_text=body.clarification_text,
                 refined_question=body.refined_question,
+                pinned_table_ids=body.pinned_table_ids,
                 audit=audit,
             ):
                 if event.get("type") == "complete":
@@ -2285,6 +2310,19 @@ def _save_ask_memory(
     else:
         db.add(Memory(project_id=project_id, thread_id=thread_id, **payload))
     _touch_thread(db, thread_id, result["question"])
+    if project_id and result.get("sql_steps"):
+        try:
+            import notebook_api
+
+            notebook_api.sync_notebook_steps(
+                db,
+                project_id,
+                question=result["question"],
+                sql_steps=result.get("sql_steps") or [],
+                analysis=result.get("analysis") or "",
+            )
+        except Exception:
+            pass
     try:
         from thread_kb import refresh_thread_overview
 
@@ -2356,6 +2394,7 @@ def ask(
             clarification_choice=body.clarification_choice,
             clarification_text=body.clarification_text,
             refined_question=body.refined_question,
+            pinned_table_ids=body.pinned_table_ids,
             audit=audit,
         ):
             if event.get("type") == "complete":
@@ -2430,6 +2469,7 @@ def ask_stream(
                 clarification_choice=body.clarification_choice,
                 clarification_text=body.clarification_text,
                 refined_question=body.refined_question,
+                pinned_table_ids=body.pinned_table_ids,
                 audit=audit,
             ):
                 if event.get("type") == "complete":

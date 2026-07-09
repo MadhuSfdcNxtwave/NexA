@@ -1,10 +1,14 @@
 """Plan which project tables match a question (shown in ask progress UI).
 
-Routing order:
+Routing order (Hex-style — metadata + curation first, LLM last):
+  0. User @mention / pinned_table_ids (must use)
   1. Breakdown follow-up / domain table pins (deterministic safety net)
-  2. Fused retrieval over all tables (vector + keyword) → LLM disambiguation on top 8
-  3. Keyword/profile scoring fallback
-  4. Legacy LLM table router as last resort
+  2. Fused retrieval → auto-pick when score gap is clear
+  3. Metadata keyword backup when fusion is ambiguous
+  4. LLM disambiguation on top-K only when still ambiguous
+  5. Metadata keyword fallback (again if LLM confidence is low)
+  6. Keyword/profile scoring fallback
+  7. Legacy LLM table router as last resort
 """
 from __future__ import annotations
 
@@ -210,6 +214,65 @@ def _vector_route_tables(
     return selected, reason
 
 
+def _metadata_auto_pick(
+    question: str,
+    fused: list[Any],
+    matches: list[TableMatch],
+    knowledges: list[kb.TableKnowledge],
+) -> tuple[list[str], str] | None:
+    """Skip LLM when fused metadata search has a clear winner."""
+    import config
+
+    if not fused or not config.ROUTING_AUTO_PICK_ENABLED:
+        return None
+
+    top = fused[0]
+    second_score = fused[1].fused_score if len(fused) > 1 else 0.0
+    gap = top.fused_score - second_score
+    knowledge = next((k for k in knowledges if k.full_table_id == top.full_table_id), None)
+    match = next((m for m in matches if m.full_table_id == top.full_table_id), None)
+
+    if gap >= config.ROUTING_AUTO_PICK_GAP and top.fused_score >= 0.12:
+        return [top.full_table_id], f"Metadata search: `{top.short_name}` (clear match)"
+
+    if knowledge and knowledge.endorsed and match and match.score >= 18:
+        return [top.full_table_id], f"Endorsed table `{top.short_name}` (curated metadata match)"
+
+    if match and match.score >= 700:
+        return [top.full_table_id], f"Semantic layer + metadata: `{top.short_name}`"
+
+    return None
+
+
+def _metadata_confident_pick(
+    question: str,
+    matches: list[TableMatch],
+) -> tuple[list[str], str] | None:
+    """Keyword/metadata pick when fusion or LLM are not confident."""
+    import config
+
+    if not config.ROUTING_METADATA_BACKUP_ENABLED or not matches:
+        return None
+
+    top = matches[0]
+    if top.score <= 0:
+        return None
+
+    second_score = matches[1].score if len(matches) > 1 else 0
+    gap = top.score - second_score
+
+    if top.score >= 700:
+        return [top.full_table_id], f"Metadata: `{top.short_name}` (semantic layer match)"
+
+    if top.score >= config.ROUTING_METADATA_MIN_SCORE and gap >= config.ROUTING_METADATA_SCORE_GAP:
+        return [top.full_table_id], f"Metadata: `{top.short_name}` (clear keyword gap)"
+
+    picked, reason = _keyword_route_tables(question, matches)
+    if picked:
+        return picked, reason
+    return None
+
+
 def _fusion_route_tables(
     question: str,
     matches: list[TableMatch],
@@ -229,6 +292,22 @@ def _fusion_route_tables(
     if not fused:
         return [], "", {}, [], ""
 
+    auto = _metadata_auto_pick(question, fused, matches, knowledges)
+    if auto:
+        picked, route_label = auto
+        kb_columns, kb_filters, kb_measure = _plan_columns_for_selection(
+            question, picked, knowledges, project_tables, ""
+        )
+        return picked, route_label, kb_columns, kb_filters, kb_measure
+
+    meta = _metadata_confident_pick(question, matches)
+    if meta:
+        picked, route_label = meta
+        kb_columns, kb_filters, kb_measure = _plan_columns_for_selection(
+            question, picked, knowledges, project_tables, ""
+        )
+        return picked, f"Metadata backup (fused ambiguous): {route_label}", kb_columns, kb_filters, kb_measure
+
     catalog = kba.build_card_catalog(fused, knowledges, project_tables)
     if not catalog:
         return [], "", {}, [], ""
@@ -245,16 +324,32 @@ def _fusion_route_tables(
         result = {}
 
     table_fq = result.get("table") or ""
-    if table_fq in valid_ids:
+    confidence = str(result.get("confidence") or "medium").strip().lower()
+    if table_fq in valid_ids and confidence != "low":
         picked = [table_fq]
         reason = result.get("reason") or "LLM disambiguation from fused top tables"
         kb_measure = result.get("measure") or ""
         route_label = f"Fused routing + LLM: {reason}"
+    elif table_fq in valid_ids and confidence == "low":
+        meta = _metadata_confident_pick(question, matches)
+        if meta:
+            picked, route_label = meta
+            route_label = f"Metadata backup (LLM low confidence): {route_label}"
+        else:
+            picked = [table_fq]
+            reason = result.get("reason") or "LLM disambiguation (low confidence)"
+            kb_measure = result.get("measure") or ""
+            route_label = f"Fused routing + LLM: {reason}"
     else:
-        # Fallback to highest fused score when LLM fails or returns invalid id
-        picked = [fused[0].full_table_id]
-        reason = f"Top fused match `{fused[0].short_name}` (LLM unavailable)"
-        route_label = reason
+        meta = _metadata_confident_pick(question, matches)
+        if meta:
+            picked, route_label = meta
+            route_label = f"Metadata backup (LLM unavailable): {route_label}"
+        else:
+            # Fallback to highest fused score when LLM fails or returns invalid id
+            picked = [fused[0].full_table_id]
+            reason = f"Top fused match `{fused[0].short_name}` (LLM unavailable)"
+            route_label = reason
 
     try:
         from debug_session import ask_trace
@@ -265,6 +360,7 @@ def _fusion_route_tables(
             picked=[fq.rsplit(".", 1)[-1] for fq in picked],
             llm_table=table_fq.rsplit(".", 1)[-1] if table_fq else "",
             confidence=result.get("confidence", ""),
+            metadata_backup=route_label.startswith("Metadata backup"),
         )
     except Exception:
         pass
@@ -312,14 +408,86 @@ def _plan_columns_for_selection(
     return kb_columns, kb_filters, measure
 
 
+def _apply_intent_rerank(matches: list[TableMatch], question: str) -> None:
+    """Boost table scores using planner intent before final routing selection."""
+    try:
+        from query_planner import classify_intent
+
+        intent = classify_intent(question)
+    except Exception:
+        return
+
+    q = question.lower()
+    for m in matches:
+        short = m.short_name.lower()
+        if intent == "topic_search":
+            if "nps" in short and "contextual" not in short:
+                m.score += 220
+            if "contextual_feedback" in short and ("nps" in q or "form responses" in q):
+                m.score -= 350
+            if short == "nps_all_form_responses" or "nps_all" in short:
+                m.score += 300
+        elif intent in ("aggregate", "breakdown"):
+            if re.search(
+                r"\b(learning[\s_-]*portal|portal)\b.{0,50}\b(activity|activit|page|events?)\b|"
+                r"\bin which activity\b",
+                q,
+            ):
+                if "day_and_page_wise" in short:
+                    m.score += 500
+                if "event_engagement" in short:
+                    m.score -= 450
+                if "master_data" in short and "which" in q:
+                    m.score -= 200
+            if re.search(
+                r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"
+                r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",
+                q,
+            ):
+                if "day_and_page_wise" in short:
+                    m.score += 450
+                if "master_data" in short:
+                    m.score -= 250
+        elif intent == "survey_distribution":
+            if "contextual_feedback" in short or "survey" in short:
+                m.score += 180
+        elif intent == "compound":
+            if any(k in short for k in ("attendance", "master_data", "engagement")):
+                m.score += 200
+
+
+def _apply_glossary_rerank(matches: list[TableMatch], question: str) -> None:
+    """Boost tables whose model matches a glossary term hit."""
+    try:
+        from metrics_registry import match_glossary_terms
+        from semantic_layer import semantic_by_model_id
+
+        hits = match_glossary_terms(question)
+        if not hits:
+            return
+        model_ids = {term.model_id for term, _ in hits}
+        for m in matches:
+            short = m.short_name.lower()
+            for mid in model_ids:
+                if short == mid.lower() or mid.lower() in short:
+                    m.score += 700
+                sem = semantic_by_model_id(mid)
+                if sem and sem.full_table_id:
+                    if sem.full_table_id.rsplit(".", 1)[-1].lower() == short:
+                        m.score += 700
+    except Exception:
+        pass
+
+
 def build_ask_plan(
     question: str,
     project_tables: list[Any],
     join_hints: str = "",
     *,
     prior_sql: str = "",
+    user_table_pins: list[str] | None = None,
 ) -> AskPlan:
-    """Select tables: fused retrieval → keyword scoring → LLM router fallback."""
+    """Select tables: user pins → metadata fusion → keyword → LLM fallback."""
     import config
     from question_intent import question_is_breakdown_followup, question_wants_breakdown
     from table_routing import (
@@ -345,12 +513,19 @@ def build_ask_plan(
             )
         )
 
+    _apply_intent_rerank(matches, question)
+    if config.GLOSSARY_ENABLED:
+        _apply_glossary_rerank(matches, question)
     matches.sort(key=lambda m: (-m.score, m.short_name.lower()))
 
     prior_table_ids = _tables_from_prior_sql(prior_sql, included)
-    is_followup = question_is_breakdown_followup(
-        question, prior_sql=prior_sql
-    ) or (bool(prior_sql) and question_wants_breakdown(question))
+    from question_intent import is_drill_down_data_request
+
+    is_followup = (
+        question_is_breakdown_followup(question, prior_sql=prior_sql)
+        or (bool(prior_sql) and question_wants_breakdown(question))
+        or (bool(prior_sql) and is_drill_down_data_request(question))
+    )
     if prior_table_ids and is_followup:
         prior_set = set(prior_table_ids)
         for m in matches:
@@ -366,12 +541,22 @@ def build_ask_plan(
     kb_filters: list[str] = []
     kb_measure = ""
     pinned: list[str] = []
+    user_pinned = bool(user_table_pins)
 
-    # Breakdown follow-ups must stay on the prior query's table(s).
-    if prior_table_ids and is_followup:
+    # 0. Explicit user control — @mention or pinned_table_ids from API.
+    if user_table_pins:
+        allowed = {t.full_table_id for t in included}
+        selected_ids = [fq for fq in user_table_pins if fq in allowed][:_MAX_SELECTED]
+        if selected_ids:
+            short = ", ".join(f"`{fq.rsplit('.', 1)[-1]}`" for fq in selected_ids)
+            route_reason = f"User table pin: {short}"
+
+    # Breakdown / drill-down follow-ups must stay on the prior query's table(s).
+    if not selected_ids and prior_table_ids and is_followup:
         selected_ids = prior_table_ids[:_MAX_SELECTED]
         short = ", ".join(f"`{fq.rsplit('.', 1)[-1]}`" for fq in selected_ids)
-        route_reason = f"Breakdown follow-up — reusing table(s) from prior query: {short}"
+        kind = "Drill-down" if is_drill_down_data_request(question) else "Breakdown"
+        route_reason = f"{kind} follow-up — reusing table(s) from prior query: {short}"
 
     # Compound multi-domain → both tables + join (skip single-table domain pin).
     elif compound:
@@ -436,7 +621,7 @@ def build_ask_plan(
         m.selected = m.full_table_id in selected_ids
 
     catalog = jg.catalog_short_names(included)
-    if pinned and not compound:
+    if (pinned or user_pinned) and not compound:
         join_relations = []
         join_reasoning = ""
     else:
@@ -461,7 +646,7 @@ def build_ask_plan(
             route_reason = f"Compound domain (join): {short}"
             if join_reasoning:
                 route_reason = f"{route_reason}. {join_reasoning}"
-    elif not compound:
+    elif not compound and not user_pinned:
         forced = domain_table_override(question, included)
         if forced:
             selected_ids = forced[:_MAX_SELECTED]

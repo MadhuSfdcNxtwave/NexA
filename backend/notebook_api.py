@@ -473,6 +473,103 @@ def sync_thread_memory(
         )
 
 
+def sync_notebook_steps(
+    db: Session,
+    project_id: int,
+    *,
+    question: str,
+    sql_steps: list[dict[str, Any]],
+    analysis: str = "",
+) -> None:
+    """Persist Hex-style multi-step SQL as notebook cells (one cell per step)."""
+    qtext = (question or "").strip()
+    if not qtext or not sql_steps:
+        return
+
+    key = _ask_key(qtext)
+    cells = db.scalars(
+        select(NotebookCell)
+        .where(NotebookCell.project_id == project_id)
+        .order_by(NotebookCell.sort_order, NotebookCell.id)
+    ).all()
+    max_order = max((c.sort_order for c in cells), default=-1)
+
+    # Remove prior step cells for this ask
+    for c in list(cells):
+        cfg = _parse_config(c.config_json)
+        if cfg.get("source") == "thread" and cfg.get("ask_key") == key and cfg.get("role") == "chain_step":
+            db.execute(delete(NotebookCellRun).where(NotebookCellRun.cell_id == c.id))
+            db.delete(c)
+    db.flush()
+
+    cells = db.scalars(
+        select(NotebookCell)
+        .where(NotebookCell.project_id == project_id)
+        .order_by(NotebookCell.sort_order, NotebookCell.id)
+    ).all()
+    max_order = max((c.sort_order for c in cells), default=-1)
+
+    q_cell = None
+    for c in cells:
+        cfg = _parse_config(c.config_json)
+        if cfg.get("source") == "thread" and cfg.get("ask_key") == key and cfg.get("role") == "question":
+            q_cell = c
+            break
+
+    if not q_cell:
+        max_order += 1
+        q_cell = NotebookCell(
+            project_id=project_id,
+            cell_type="text",
+            name=f"thread_q_{key[:8]}",
+            content=qtext,
+            config_json=json.dumps({"source": "thread", "ask_key": key, "role": "question"}),
+            sort_order=max_order,
+        )
+        db.add(q_cell)
+        db.flush()
+
+    cap = config.NOTEBOOK_MAX_ROWS
+    for i, step in enumerate(sql_steps, 1):
+        sql = (step.get("sql") or "").strip()
+        if not sql:
+            continue
+        label = step.get("label") or f"Step {i}"
+        max_order += 1
+        safe_label = re.sub(r"[^\w\s-]", "", label)[:40].strip().replace(" ", "_") or f"step_{i}"
+        cell = NotebookCell(
+            project_id=project_id,
+            cell_type="sql",
+            name=f"thread_{key[:6]}_{safe_label}",
+            content=sql,
+            config_json=json.dumps(
+                {
+                    "source": "thread",
+                    "ask_key": key,
+                    "role": "chain_step",
+                    "step_index": i,
+                    "step_label": label,
+                    "question_id": q_cell.id,
+                }
+            ),
+            sort_order=max_order,
+        )
+        db.add(cell)
+        db.flush()
+        db.add(
+            NotebookCellRun(
+                project_id=project_id,
+                cell_id=cell.id,
+                cell_name=cell.name,
+                sql=sql,
+                summary=(analysis or "")[:500] if i == len(sql_steps) else label,
+                columns_json=json.dumps(step.get("columns") or []),
+                rows_json=json.dumps((step.get("rows") or [])[:cap], default=str),
+                bytes_estimate=step.get("bytes_estimate"),
+            )
+        )
+
+
 def purge_thread_synced_cells(db: Session, project_id: int) -> int:
     """Remove legacy Thread→Notebook mirror cells (threads are independent now)."""
     cells = db.scalars(select(NotebookCell).where(NotebookCell.project_id == project_id)).all()

@@ -300,7 +300,7 @@ def score_table_knowledge(
                 score += 5
 
     if knowledge.endorsed:
-        score += 50
+        score += 120
 
     return score
 

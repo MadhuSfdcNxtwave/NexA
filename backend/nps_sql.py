@@ -11,8 +11,35 @@ _NPS = re.compile(
     re.I,
 )
 _NPS_SCORE = re.compile(r"\bnps\s*(score)?\b|net promoter", re.I)
-_NPS_THRESHOLD = re.compile(r"\b(above|below|over|under|greater|less|>=|<=|>|<)\s*(\d+)", re.I)
-_BY = re.compile(r"\bby\s+(\w+)", re.I)
+_NPS_IMPROVE = re.compile(
+    r"\b(improv(?:e|ed|ement)|worked well|helped|drove|boosted)\b.{0,50}\b(nps|score|rating)\b|"
+    r"\b(nps|score|rating)\b.{0,50}\b(improv(?:e|ed|ement)|activity|aspect|feature)\b|"
+    r"\bwhich\b.{0,40}\b(activity|aspect|feature|program)\b",
+    re.I,
+)
+_ASPECT_COLS = (
+    "what_aspects_of_the_program_made_you_feel_confident_to_recommend_us",
+    "what_aspects_helped_you_feel_job_ready",
+    "please_share_a_short_noteA_about_what_worked_well_for_you",
+    "please_share_a_short_note_about_what_worked_well_for_you",
+)
+
+
+def is_nps_improvement_question(question: str) -> bool:
+    from question_intent import expand_question_abbreviations
+
+    q = expand_question_abbreviations((question or "").strip())
+    return bool(q and _NPS.search(q) and _NPS_IMPROVE.search(q))
+
+
+def _pick_aspect_col(cols: set[str]) -> str | None:
+    lower_map = {c.lower(): c for c in cols}
+    for cand in _ASPECT_COLS:
+        if cand in cols:
+            return cand
+        if cand.lower() in lower_map:
+            return lower_map[cand.lower()]
+    return None
 _LEGACY = re.compile(r"\b(nov|dec).{0,12}2025|snapshot|legacy\b", re.I)
 _PROMOTER = re.compile(r"\bpromoter", re.I)
 _DETRACTOR = re.compile(r"\bdetractor", re.I)
@@ -108,7 +135,7 @@ def _month_date_filter(
     nps_cols: set[str],
     tables: list[Any],
 ) -> str:
-    """WHERE clause for month/year mentioned in the question."""
+    """WHERE clause for month/year or relative ranges mentioned in the question."""
     from datetime import date
 
     from question_dates import (
@@ -116,9 +143,32 @@ def _month_date_filter(
         _pick_year_for_month,
         _profile_ranges,
         _year_from_question,
+        date_filter_sql,
+        resolve_relative_range,
     )
 
     q = question or ""
+    month_col = next((c for c in nps_cols if "form_submission_month" in c.lower()), None)
+    date_col = month_col or next(
+        (c for c in nps_cols if c.lower() in ("form_submission_datetime", "submitted_date")),
+        None,
+    )
+
+    rel = resolve_relative_range(q)
+    if rel and date_col:
+        start, end = rel
+        # Month bucket columns store first-of-month dates.
+        if month_col and "month" in month_col.lower():
+            start_m = start.replace(day=1)
+            end_m = end.replace(day=1)
+            if start_m == end_m:
+                return f"`{month_col}` = DATE '{start_m.isoformat()}'"
+            return (
+                f"`{month_col}` BETWEEN DATE '{start_m.isoformat()}' "
+                f"AND DATE '{end_m.isoformat()}'"
+            )
+        return date_filter_sql(date_col, start, end)
+
     month = _month_from_question(q)
     year = _year_from_question(q)
     ql = q.lower()
@@ -139,10 +189,33 @@ def _month_date_filter(
     if not year:
         year = date.today().year
 
-    for c in nps_cols:
-        if "form_submission_month" in c.lower():
-            return f"`{c}` = DATE '{year}-{month:02d}-01'"
+    if month_col:
+        return f"`{month_col}` = DATE '{year}-{month:02d}-01'"
     return ""
+
+
+def wants_monthly_nps_scores(question: str) -> bool:
+    """True for «last N months NPS scores» / monthly NPS score series."""
+    q = (question or "").strip()
+    if not q or not _NPS.search(q):
+        return False
+    if re.search(
+        r"\b(?:last|past|previous)\s+(?:\d+|one|two|three|four|five|six)\s+months?\b",
+        q,
+        re.I,
+    ):
+        return True
+    if re.search(r"\bmonthly\s+nps\b|\bnps\s+by\s+month\b|\bnps\s+scores?\b", q, re.I):
+        if re.search(r"\bmonth", q, re.I):
+            return True
+    return False
+
+
+def _nps_score_expr(score_col: str) -> str:
+    return (
+        f"ROUND(100.0 * (COUNTIF(`{score_col}` >= 9) - COUNTIF(`{score_col}` <= 6)) "
+        f"/ NULLIF(COUNT(`{score_col}`), 0), 2)"
+    )
 
 
 def _threshold_filter(score_col: str, question: str) -> str | None:
@@ -227,6 +300,44 @@ def try_build_nps_sql(
     if not score_col:
         return None
 
+    if is_nps_improvement_question(q):
+        aspect_col = _pick_aspect_col(nps_cols)
+        if aspect_col:
+            date_f = _month_date_filter(q, nps_fq, nps_cols, tables)
+            filt = [f"`{aspect_col}` IS NOT NULL", f"TRIM(CAST(`{aspect_col}` AS STRING)) != ''", f"`{score_col}` IS NOT NULL"]
+            if date_f:
+                filt.append(date_f)
+            return f"""SELECT
+  `{aspect_col}` AS program_aspect,
+  COUNT(*) AS response_count,
+  ROUND(AVG(`{score_col}`), 2) AS avg_nps_rating,
+  COUNTIF(`{score_col}` >= 9) AS promoters,
+  COUNTIF(`{score_col}` <= 6) AS detractors
+FROM `{nps_fq}`
+WHERE {' AND '.join(filt)}
+GROUP BY `{aspect_col}`
+ORDER BY avg_nps_rating DESC, response_count DESC
+LIMIT 30"""
+
+    # Monthly NPS scores for last N months (or by month).
+    month_col = next((c for c in nps_cols if "form_submission_month" in c.lower()), None)
+    if wants_monthly_nps_scores(q) and month_col:
+        date_f = _month_date_filter(q, nps_fq, nps_cols, tables)
+        filt = [f"`{score_col}` IS NOT NULL", f"`{month_col}` IS NOT NULL"]
+        if date_f:
+            filt.append(date_f)
+        return f"""SELECT
+  `{month_col}` AS `month`,
+  {_nps_score_expr(score_col)} AS `nps_score`,
+  COUNT(`{score_col}`) AS `responses`,
+  COUNTIF(`{score_col}` >= 9) AS `promoters`,
+  COUNTIF(`{score_col}` <= 6) AS `detractors`
+FROM `{nps_fq}`
+WHERE {' AND '.join(filt)}
+GROUP BY `{month_col}`
+ORDER BY `{month_col}` DESC
+LIMIT 24"""
+
     date_f = _month_date_filter(q, nps_fq, nps_cols, tables)
     thresh_f = _threshold_filter(score_col, q)
     base_filters = [f for f in (date_f, thresh_f) if f]
@@ -285,11 +396,10 @@ ORDER BY avg_nps DESC"""
     # Canonical NPS score — (promoters − detractors) / total, not AVG.
     if _NPS_SCORE.search(q) and not _AVG.search(q) and not dim:
         filt = base_filters + [f"`{score_col}` IS NOT NULL"]
+        where = f"\nWHERE {' AND '.join(filt)}" if filt else ""
         return (
-            f"SELECT ROUND(100.0 * (COUNTIF(`{score_col}` >= 9) - COUNTIF(`{score_col}` <= 6)) "
-            f"/ NULLIF(COUNT(`{score_col}`), 0), 2) AS nps_score\n"
-            f"FROM `{nps_fq}`\n"
-            f"WHERE {' AND '.join(filt)}"
+            f"SELECT {_nps_score_expr(score_col)} AS nps_score\n"
+            f"FROM `{nps_fq}`{where}"
         )
 
     if _PROMOTER.search(q) and dim and dim in nps_cols:

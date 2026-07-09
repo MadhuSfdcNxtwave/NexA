@@ -81,22 +81,70 @@ def _rule_plan_steps(question: str, *, max_steps: int = 3) -> list[dict[str, str
     return []
 
 
+def _plan_and_split(question: str, *, max_steps: int = 3) -> list[dict[str, str]]:
+    """
+    Split independent metrics joined by 'and' into separate chain steps.
+    Skips when a single JOIN compound template applies (attendance ∩ portal, etc.).
+    """
+    q = (question or "").strip()
+    if not q or not re.search(r"\band\b", q, re.I):
+        return []
+
+    from table_routing import is_compound_domain_question
+
+    if is_compound_domain_question(q):
+        return []
+
+    parts = [p.strip(" ?.,;") for p in re.split(r"\s+and\s+", q, flags=re.I)]
+    parts = [p for p in parts if len(p) >= 8]
+    if len(parts) < 2:
+        return []
+
+    steps: list[dict[str, str]] = []
+    for part in parts[:max_steps]:
+        if not re.search(
+            r"\b(how many|count|number of|average|avg|what|which|nps|total|show)\b",
+            part,
+            re.I,
+        ):
+            part = f"How many / what: {part}"
+        label = part[:48] + ("…" if len(part) > 48 else "")
+        steps.append({"label": label, "question": part})
+    return steps if len(steps) >= 2 else []
+
+
+def needs_single_join_compound(question: str) -> bool:
+    """True when one JOIN query answers the question (not a multi-step chain)."""
+    from table_routing import is_compound_domain_question
+
+    return is_compound_domain_question(question)
+
+
 def plan_steps(question: str, schema_text: str, *, max_steps: int = 3) -> list[dict[str, str]]:
     """
     Return chain steps as [{label, question}, ...].
     Empty list means use a single SQL query.
     """
-    if not chain_candidate(question):
+    if needs_single_join_compound(question):
+        return []
+
+    if not chain_candidate(question) and not re.search(r"\band\b", question, re.I):
         return []
 
     import config
 
     if config.SQL_CHAIN_PLANNER == "rules":
-        return _rule_plan_steps(question, max_steps=max_steps)
+        steps = _rule_plan_steps(question, max_steps=max_steps)
+        if steps:
+            return steps
+        return _plan_and_split(question, max_steps=max_steps)
 
     plan = llm.plan_sql_chain(question, schema_text, max_steps=max_steps)
     if plan.get("mode") != "chain":
-        return []
+        and_steps = _plan_and_split(question, max_steps=max_steps)
+        if and_steps:
+            return and_steps
+        return _rule_plan_steps(question, max_steps=max_steps)
 
     steps: list[dict[str, str]] = []
     for raw in plan.get("steps") or []:

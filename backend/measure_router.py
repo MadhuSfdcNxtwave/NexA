@@ -125,17 +125,17 @@ def _score_semantic_table(question: str, semantic: TableSemantic) -> int:
     if re.search(r"\battend", q) and "cloudwatch" in name:
         score -= 300
     if re.search(r"\bactive\b", q) and re.search(r"\blearning[\s_-]*portal|\bportal\b", q):
-        if name == "z_ccbp_academy_users_master_data":
-            score += 500
         if name == "academy_users_day_and_page_wise_time_spent_details":
-            score -= 200
+            score += 650
+        if name == "z_ccbp_academy_users_master_data":
+            score += 200
         if "question_wise" in name or "question_set" in name:
             score -= 400
     if re.search(r"\bactive\b", q) and re.search(r"\bplatform\b", q):
         if "daily_engagement" in name or "time_spent" in name:
             score += 200
-    if re.search(r"\bnps\s+form|\bnps_form_responses", q):
-        if "nps" in name:
+    if re.search(r"\bnps\b", q):
+        if "nps" in name and "contextual_feedback" not in name:
             score += 400
         if "contextual_feedback" in name:
             score -= 400
@@ -183,16 +183,16 @@ def try_build_measure_plan(
     if not ranked:
         return None
     ranked.sort(key=lambda x: (-x[0], x[1].full_table_id))
-    table = ranked[0][1]
-    semantic = ranked[0][2]
+    wants_avg = bool(_AVG_RE.search(question))
 
-    fq = table.full_table_id
-    short = fq.rsplit(".", 1)[-1]
-    group_by = _breakdown_dims(question, semantic)
-
-    if _AVG_RE.search(question):
-        measure = _pick_avg_measure(semantic, question)
-        if measure:
+    if wants_avg:
+        for _score, table, semantic in ranked:
+            measure = _pick_avg_measure(semantic, question)
+            if not measure:
+                continue
+            fq = table.full_table_id
+            short = fq.rsplit(".", 1)[-1]
+            group_by = _breakdown_dims(question, semantic)
             return MeasurePlan(
                 table_fq=fq,
                 table_short=short,
@@ -200,6 +200,14 @@ def try_build_measure_plan(
                 group_by=group_by,
                 reason=f"Semantic avg measure `{measure.id}` on `{short}`",
             )
+        return None
+
+    table = ranked[0][1]
+    semantic = ranked[0][2]
+
+    fq = table.full_table_id
+    short = fq.rsplit(".", 1)[-1]
+    group_by = _breakdown_dims(question, semantic)
 
     if _COUNT_RE.search(question) or not group_by:
         measure = _pick_count_measure(semantic, question)

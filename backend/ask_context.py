@@ -99,17 +99,28 @@ def _presentation_hints(
     entity: str,
     wants_breakdown: bool,
     matched_label: str = "",
+    *,
+    question: str = "",
+    row_count: int = 0,
 ) -> list[str]:
+    from question_intent import expand_question_abbreviations, question_needs_deep_analysis
+
+    q = expand_question_abbreviations(question or "")
     out = [
         "Lead with the direct answer in plain English — no SQL or table names.",
         "Only use numbers that appear in the query result; do not invent trends.",
     ]
     topic = matched_label or _ENTITY_LABELS.get(entity, "the metric")
     out.append(f"The question is about {topic} — answer that topic directly.")
-    if wants_breakdown:
-        out.append("Name the top categories with their counts; keep it scannable.")
+    if question_needs_deep_analysis(q) or wants_breakdown or row_count > 1:
+        out.append(
+            "Cover every part of the question: what happened, why it matters, "
+            "how to interpret the numbers, and any caveats."
+        )
+        if wants_breakdown or row_count > 1:
+            out.append("Name the top categories with their values; keep it scannable.")
     else:
-        out.append("For a single metric, one clear sentence with the number is enough.")
+        out.append("Give a clear answer with context — not just a lone number.")
     return out
 
 
@@ -131,6 +142,8 @@ def build_query_context(
         msg = "Reviewing your previous answers…"
     elif intent == "assistant":
         msg = "Understanding your message…"
+    elif intent == "knowledge_query":
+        msg = "Looking up what that means…"
     elif wants_bd:
         msg = f"Understanding your question — breakdown by {label}…"
     else:
@@ -145,7 +158,7 @@ def build_query_context(
         entity_label=label,
         sql_entity_hint=_static_sql_hint(entity, wants_bd),
         understanding_message=msg,
-        presentation_hints=_presentation_hints(entity, wants_bd),
+        presentation_hints=_presentation_hints(entity, wants_bd, question=expanded),
     )
 
 
@@ -190,7 +203,9 @@ def enrich_query_context(
         entity_label=entity_label,
         sql_entity_hint=merged_hint,
         understanding_message=msg,
-        presentation_hints=_presentation_hints(ctx.entity, ctx.wants_breakdown, matched_label),
+        presentation_hints=_presentation_hints(
+            ctx.entity, ctx.wants_breakdown, matched_label, question=ctx.question
+        ),
         schema_entities=entities,
         matched_entity_label=matched_label,
     )

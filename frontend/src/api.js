@@ -2,7 +2,41 @@
 // VITE_API_URL (set in Render's static-site env). Falls back to localhost.
 import { getToken, clearSession } from "./auth.js";
 
-const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// In local dev, Vite proxies /api → http://127.0.0.1:8000 (see vite.config.js).
+function resolveApiBase() {
+  const fromEnv = (import.meta.env.VITE_API_URL || "").trim().replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  if (import.meta.env.DEV) return "/api";
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    // NexA Render production — API service is nexa-gays (any nexa* static site).
+    if (host.endsWith(".onrender.com") && host.startsWith("nexa") && host !== "nexa-gays.onrender.com") {
+      return "https://nexa-gays.onrender.com";
+    }
+  }
+  return "http://localhost:8000";
+}
+
+const BASE = resolveApiBase();
+
+const REQUEST_TIMEOUT_MS = 90000;
+
+function networkErrorMessage(err) {
+  const waking =
+    "The API may be waking up (Render free tier) — wait up to a minute and refresh.";
+  if (err?.name === "AbortError") {
+    return import.meta.env.DEV
+      ? "Backend is not responding — start the API server on port 8000 and refresh."
+      : `Cannot reach the NexA API. ${waking}`;
+  }
+  if (err?.message?.includes("Failed to fetch") || err?.message?.includes("NetworkError")) {
+    return import.meta.env.DEV
+      ? "Cannot reach the backend — start the API server on port 8000."
+      : `Cannot reach the NexA API at ${BASE}. ${waking}`;
+  }
+  return err?.message || "Request failed";
+}
 
 function headers(json = false, { auth = true } = {}) {
   const h = {};
@@ -25,12 +59,22 @@ function handleUnauthorized(res, path = "") {
   return true;
 }
 
-async function req(path, { method = "GET", body, auth = true } = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: headers(Boolean(body), { auth }),
-    body: body ? JSON.stringify(body) : undefined,
-  });
+async function req(path, { method = "GET", body, auth = true, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: headers(Boolean(body), { auth }),
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new Error(networkErrorMessage(err));
+  } finally {
+    clearTimeout(timer);
+  }
   if (handleUnauthorized(res, path)) {
     throw new Error("Session expired — please sign in again");
   }
@@ -86,6 +130,7 @@ export const api = {
       clarificationChoice,
       clarificationText,
       refinedQuestion,
+      pinnedTableIds = [],
     } = opts;
     const res = await fetch(`${BASE}/threads/${threadId}/ask/stream`, {
       method: "POST",
@@ -96,6 +141,7 @@ export const api = {
         clarification_choice: clarificationChoice || null,
         clarification_text: clarificationText || null,
         refined_question: refinedQuestion || null,
+        pinned_table_ids: pinnedTableIds,
       }),
     });
     if (handleUnauthorized(res)) {
@@ -224,7 +270,7 @@ export const api = {
     req(`/projects/${id}/memory${threadId ? `?thread_id=${threadId}` : ""}`, { method: "DELETE" }),
   ask: (id, question) =>
     req(`/projects/${id}/ask`, { method: "POST", body: { question } }),
-  askStream: async (id, question, onEvent, { forceFresh = false, clarificationChoice, clarificationText, refinedQuestion, threadId = null } = {}) => {
+  askStream: async (id, question, onEvent, { forceFresh = false, clarificationChoice, clarificationText, refinedQuestion, threadId = null, pinnedTableIds = [] } = {}) => {
     const res = await fetch(`${BASE}/projects/${id}/ask/stream`, {
       method: "POST",
       headers: headers(true),
@@ -235,6 +281,7 @@ export const api = {
         clarification_choice: clarificationChoice || null,
         clarification_text: clarificationText || null,
         refined_question: refinedQuestion || null,
+        pinned_table_ids: pinnedTableIds,
       }),
     });
     if (handleUnauthorized(res)) {

@@ -45,6 +45,25 @@ _HELP = re.compile(
     r"\b(what can you do|how do i use|help me use|how does this work)\b",
     re.I,
 )
+_KNOWLEDGE = re.compile(
+    r"^\s*(what is|what's|what does|what do|define|meaning of|stands for|"
+    r"abbreviation for|acronym for|tell me about)\b",
+    re.I,
+)
+_KNOWLEDGE_EXPLAIN = re.compile(
+    r"^\s*explain\b(?!\s+(this|that|your|the|why|how did))\b",
+    re.I,
+)
+_METRIC_IN_QUESTION = re.compile(
+    r"\b(how many|count|total|average|avg|by month|by gender|trend|show me|"
+    r"list|score for|in \d{4}|for \w+ \d{4}|last \d+ days?|this month)\b",
+    re.I,
+)
+_WHICH_DIM = re.compile(
+    r"\b(which|what)\s+(activity|activities|page|pages|aspect|aspects|"
+    r"feature|features|program|category|categories)\b",
+    re.I,
+)
 _BREAKDOWN = re.compile(
     r"\b("
     r"by|per|wise|breakdown|break down|grouped|each|split|distribution|"
@@ -75,6 +94,11 @@ def expand_question_abbreviations(question: str) -> str:
     text = re.sub(r"\b[Gg][Cc]s\b", "growth cycles", text)
     text = re.sub(r"\b[Gg][Cc]\b", "growth cycles", text)
     text = re.sub(r"\bpotal\b", "portal", text, flags=re.I)
+    text = re.sub(r"\blearningportal\b", "learning portal", text, flags=re.I)
+    text = re.sub(r"\bactivlly\b", "actively", text, flags=re.I)
+    text = re.sub(r"\bactivly\b", "actively", text, flags=re.I)
+    text = re.sub(r"\battendence\b", "attendance", text, flags=re.I)
+    text = re.sub(r"\bhappend\b", "happened", text, flags=re.I)
     return text
 
 
@@ -83,9 +107,44 @@ def question_wants_breakdown(question: str) -> bool:
     q = expand_question_abbreviations(question)
     if _BREAK_DOWN_VERB.search(q):
         return True
+    if _WHICH_DIM.search(q):
+        return True
+    if re.search(r"\bwhich\b.{0,40}\b(improv|drove|boosted|helped|highest|lowest|top)\b", q, re.I):
+        return True
     if re.search(r"\bby\s+\w+", q, re.I) and _REF_PRIOR.search(q):
         return True
     return bool(_BREAKDOWN.search(q))
+
+
+def is_knowledge_question(question: str) -> bool:
+    """Definition / abbreviation questions — answer from glossary, not SQL."""
+    q = expand_question_abbreviations((question or "").strip())
+    if not q:
+        return False
+    if not (_KNOWLEDGE.search(q) or _KNOWLEDGE_EXPLAIN.search(q)):
+        return False
+    if _METRIC_IN_QUESTION.search(q):
+        return False
+    if re.search(r"\b(how many|count|total|breakdown|by \w+)\b", q, re.I):
+        return False
+    return True
+
+
+def question_needs_deep_analysis(question: str) -> bool:
+    """True when the user expects a detailed what/why/how narrative."""
+    q = expand_question_abbreviations((question or "").strip())
+    if not q:
+        return False
+    if question_wants_breakdown(q):
+        return True
+    return bool(
+        re.search(
+            r"\b(why|how|what happened|explain|improv|compare|drove|caused|"
+            r"reason|insight|analyze|analysis)\b",
+            q,
+            re.I,
+        )
+    )
 
 
 def question_is_breakdown_followup(
@@ -201,6 +260,14 @@ def is_drill_down_data_request(question: str) -> bool:
         return False
     if _DRILL_DOWN.search(q):
         return True
+    # Short follow-ups like «give with user id» / «give user ids»
+    if re.search(
+        r"\b(give|get|show|list|fetch|provide|return)\b.{0,30}\b"
+        r"(uid|user[_\s]?id|user ids?|ids?)\b",
+        q,
+        re.I,
+    ):
+        return True
     if _REF_PRIOR.search(q) and re.search(
         r"\b(uid|user_id|user ids?|ids?|names?|emails?|who|which|details?|rows?)\b",
         q,
@@ -211,9 +278,69 @@ def is_drill_down_data_request(question: str) -> bool:
     return False
 
 
+def expand_drill_down_followup(
+    question: str,
+    prior_question: str = "",
+    prior_sql: str = "",
+) -> str:
+    """
+    Turn «give with user id» into an explicit list request that reuses prior filters.
+    """
+    q = expand_question_abbreviations((question or "").strip())
+    if not is_drill_down_data_request(q):
+        return q
+    if not (prior_sql or "").strip() and not (prior_question or "").strip():
+        return q
+
+    topic = (prior_question or "").strip() or "the previous result"
+    parts = [
+        f"List distinct user_id for: {topic}.",
+        "Reuse the SAME table and WHERE filters as the prior query.",
+        "SELECT DISTINCT user_id (not COUNT).",
+        "LIMIT 500.",
+    ]
+    if prior_sql.strip():
+        try:
+            refs = {
+                m.group(1).rsplit(".", 1)[-1]
+                for m in re.finditer(r"`([^`]+)`", prior_sql)
+            }
+            if refs:
+                parts.insert(1, f"Use ONLY table(s): {', '.join(f'`{t}`' for t in sorted(refs))}.")
+        except Exception:
+            pass
+    return " ".join(parts)
+
+
+def rewrite_aggregate_to_user_list_sql(prior_sql: str) -> str | None:
+    """
+    Convert a prior COUNT(DISTINCT user_id) query into SELECT DISTINCT user_id
+    keeping the same FROM/WHERE. Returns None if prior SQL is not a simple aggregate.
+    """
+    sql = (prior_sql or "").strip().rstrip(";")
+    if not sql:
+        return None
+    # Must be a count aggregate over user_id
+    if not re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+[`\"]?user_id[`\"]?\s*\)", sql, re.I):
+        if not re.search(r"\bCOUNT\s*\(\s*\*\s*\)", sql, re.I):
+            return None
+    # Already a list query
+    if re.search(r"SELECT\s+DISTINCT\s+[`\"]?user_id", sql, re.I):
+        return None
+
+    from_m = re.search(r"\bFROM\b", sql, re.I)
+    if not from_m:
+        return None
+    tail = sql[from_m.start() :]
+    # Drop trailing ORDER BY / LIMIT from aggregate (we'll add our own LIMIT)
+    tail = re.sub(r"\bORDER\s+BY\b[\s\S]*$", "", tail, flags=re.I).strip()
+    tail = re.sub(r"\bLIMIT\s+\d+\s*$", "", tail, flags=re.I).strip()
+    return f"SELECT DISTINCT `user_id`\n{tail}\nORDER BY `user_id`\nLIMIT 500"
+
+
 def detect_intent(question: str, *, has_thread_history: bool) -> str:
     """
-    Return one of: data_query | explain_prior | assistant
+    Return one of: data_query | explain_prior | assistant | knowledge_query
     """
     q = (question or "").strip()
     if not q:
@@ -222,8 +349,12 @@ def detect_intent(question: str, *, has_thread_history: bool) -> str:
     if _GREETING.search(q) or _HELP.search(q):
         return "assistant"
 
+    expanded = expand_question_abbreviations(q)
+    if is_knowledge_question(expanded):
+        return "knowledge_query"
+
     # Breakdown / «break that down by X» always needs fresh GROUP BY SQL.
-    if question_wants_breakdown(q):
+    if question_wants_breakdown(expanded):
         return "data_query"
 
     # Drill-downs always need fresh SQL, even when referencing prior results.

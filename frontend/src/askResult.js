@@ -23,6 +23,7 @@ export function normalizeAskResult(res) {
     selected_tables: res.selected_tables,
     probe_stats: res.probe_stats,
     sql_source: res.sql_source,
+    model_used: res.model_used,
     thread_id: res.thread_id,
   };
 }

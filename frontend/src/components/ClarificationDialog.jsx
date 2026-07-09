@@ -9,6 +9,7 @@ export default function ClarificationPanel({
   onCancel,
   loading = false,
   originalQuestion = "",
+  confirmMode = false,
 }) {
   const first = options[0];
   const [selectedId, setSelectedId] = useState(first?.id ?? "custom");
@@ -28,7 +29,9 @@ export default function ClarificationPanel({
   return (
     <div className="clarification-inline" role="region" aria-label="Clarification">
       <div className="clarification-inline-head">
-        <span className="clarification-inline-title">Quick clarification</span>
+        <span className="clarification-inline-title">
+          {confirmMode ? "Are you asking about this?" : "Quick clarification"}
+        </span>
         <button
           type="button"
           className="clarification-inline-dismiss"
@@ -46,6 +49,11 @@ export default function ClarificationPanel({
         </p>
       )}
       <p className="clarification-inline-prompt">{prompt}</p>
+      {confirmMode && (
+        <p className="clarification-inline-hint muted small">
+          Pick the option that matches your intent — NexA won&apos;t guess when unsure.
+        </p>
+      )}
 
       <div className="clarification-chips">
         {options.map((opt) => (
@@ -88,7 +96,7 @@ export default function ClarificationPanel({
           disabled={loading || !editText.trim()}
           onClick={submit}
         >
-          Run query
+          {confirmMode ? "Yes, run this" : "Run query"}
         </button>
         <button type="button" className="link-btn" onClick={onCancel} disabled={loading}>
           Dismiss

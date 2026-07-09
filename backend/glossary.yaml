@@ -1,0 +1,257 @@
+# NexA Business Glossary — single source of truth for metrics, models, and filters.
+# Every path (routing, planner, SQL compose, validation, RAG) reads from here.
+#
+# Fields:
+#   id          — canonical term id (stable key)
+#   label       — human-readable name
+#   synonyms    — phrases that map to this term (longest match wins)
+#   model_id    — semantic model from workspace_models.yaml
+#   measure_id  — measure within that model (optional)
+#   intent      — default intent when this term matches
+#   filters     — resolved SQL WHERE fragments or dimension filter ids
+#   description — business definition (embedded in RAG cards)
+#   avoid       — when NOT to use this term
+
+terms:
+  - id: active_learning_portal_users
+    label: Active learning portal users
+    synonyms:
+      - active learning portal users
+      - active portal users
+      - users active on learning portal
+      - active users on portal
+      - how many active users in learning portal
+    model_id: z_ccbp_academy_users_master_data
+    measure_id: active_learning_portal_users
+    intent: aggregate
+    filters:
+      - is_not_paused
+      - has_portal_access_granted
+    description: >-
+      Users with learning portal onboarding access granted and not paused.
+      Source of truth is master data (~34,795). NOT the same as lp_status=ACTIVE
+      on the engagement table (~34,000).
+
+  - id: lp_status_active_users
+    label: Currently ACTIVE portal status (engagement table)
+    synonyms:
+      - lp status active
+      - currently active portal access
+      - lp_status active users
+    model_id: academy_users_day_and_page_wise_time_spent_details
+    measure_id: active_learning_portal_users
+    intent: aggregate
+    filters:
+      - is_lp_active
+    description: >-
+      Users whose lp_status enum is ACTIVE on the day/page engagement table.
+      Use only when the question explicitly refers to current lp_status, not
+      general "active portal users".
+
+  - id: nps_topic_feedback
+    label: NPS form topic / feature feedback
+    synonyms:
+      - nps feedback
+      - feedback on
+      - feedback about
+      - feedback we got on
+      - feedback we got about
+      - mentions of
+    model_id: nps_all_form_responses
+    intent: topic_search
+    avoid:
+      - contextual feedback
+      - emoji feedback
+    description: >-
+      Free-text feedback search across both NPS form tables (union).
+      Requires UNION ALL + REGEXP topic search, not contextual feedback table.
+
+  - id: placed_users_by_state
+    label: Placed users by state
+    synonyms:
+      - placed users by state
+      - placement by state
+      - how many placed by state
+      - placed by state
+    model_id: y_academy_users_placements_details
+    measure_id: unique_placed_users
+    intent: breakdown
+    description: >-
+      Count distinct placed users grouped by user home state from
+      academy_user_profile_basic_details (LEFT JOIN). Uses normalized
+      current_address_state with UNKNOWN fallback — not job_location.
+
+  - id: nps_by_gender
+    label: NPS score by gender
+    synonyms:
+      - nps by gender
+      - average nps by gender
+      - nps rating by gender
+    model_id: academy_nps_form_responses
+    measure_id: avg_nps_rating
+    intent: breakdown
+    description: Average NPS rating grouped by gender from master profile join.
+
+  - id: nps_score
+    label: NPS score / rating
+    synonyms:
+      - nps score
+      - net promoter score
+      - average nps
+      - nps rating
+    model_id: academy_nps_form_responses
+    measure_id: avg_nps_rating
+    intent: aggregate
+    description: >-
+      Average 0-10 NPS rating from form submissions. NPS score formula:
+      (promoters − detractors) / total × 100. Promoters = rating 9-10,
+      detractors = rating 0-6.
+
+  - id: nps_improvement_by_aspect
+    label: Which program aspect improved NPS
+    synonyms:
+      - which activity improved nps score
+      - which activity improved nps
+      - what improved nps score
+      - what activity improved nps
+      - which aspect improved nps
+      - what aspect improved nps score
+      - which program aspect improved nps
+    model_id: academy_nps_form_responses
+    measure_id: avg_nps_rating
+    intent: breakdown
+    description: >-
+      GROUP BY program aspect fields (what worked well, what aspects helped)
+      with AVG NPS rating to find which activities/aspects correlate with
+      higher scores. Uses academy_nps_form_responses aspect columns.
+
+  - id: unique_placed_users
+    label: Placed users
+    synonyms:
+      - placed users
+      - users placed
+      - placement count
+      - how many users got placed
+    model_id: y_academy_users_placements_details
+    measure_id: unique_placed_users
+    intent: aggregate
+    description: Count of distinct users with a placement record.
+
+  - id: job_applicants
+    label: Users who applied to jobs
+    synonyms:
+      - applied to jobs
+      - job applicants
+      - users applied
+      - distinct users applied
+    model_id: z_ccbp_academy_users_jobs_details
+    measure_id: unique_users
+    intent: aggregate
+    description: Distinct users with job application records.
+
+  - id: live_class_attendance
+    label: Live class attendance (JOINED)
+    synonyms:
+      - attended live class
+      - live class attendance
+      - joined live class
+      - attendance status joined
+    model_id: z_academy_users_live_classes_attendance_and_time_spent_details
+    measure_id: joined_attendance_users
+    intent: aggregate
+    filters:
+      - is_joined
+    description: Users who joined a live class session (attendance_status = JOINED).
+
+  - id: live_class_attendance_with_portal_access
+    label: Live class attendance with portal access
+    synonyms:
+      - attended live classes and have learning portal access
+      - attended live class and have portal access
+      - users attended live classes and have learning portal access
+      - attended yesterday and have learning portal access
+    model_id: compound
+    intent: compound
+    description: >-
+      Count distinct users who JOINED a live class (optionally on a date) AND
+      have active learning portal access (master data: not paused + access granted).
+      Single JOIN SQL — not two separate queries.
+
+  - id: learning_portal_activity_by_page
+    label: Learning portal activity by page
+    synonyms:
+      - in which activity students are actively in learning portal
+      - in which activity students are activlly in learningportal
+      - which activity students are in learning portal
+      - which activity on learning portal
+      - learning portal activity
+      - portal page activity
+      - activities on learning portal
+      - which page on learning portal
+      - students actively in learning portal
+      - actively in learning portal
+      - events in learning portal
+      - events happened in learning portal
+    model_id: academy_users_day_and_page_wise_time_spent_details
+    measure_id: active_learning_portal_users
+    intent: breakdown
+    filters:
+      - is_lp_active
+    description: >-
+      GROUP BY time_spent_page — which portal pages/activities active students use.
+      Use academy_users_day_and_page_wise_time_spent_details. NOT
+      y_academy_user_event_engagement_details (webinars/workshops/events).
+
+  - id: portal_activity_attendance_pct
+    label: Portal activity with live class attendance percentage
+    synonyms:
+      - learning portal activity and attendance percentage
+      - portal activity attendance percentage
+      - portal activity attendance percent
+      - events in learning portal and attendance percentage
+      - events happened in learning portal and attendance percentage
+      - learning portal events attendance percentage
+    model_id: compound
+    intent: compound
+    description: >-
+      Notebook: portal page activity breakdown + live class attendance % per page.
+      JOIN day_and_page_wise_time_spent with live_classes_attendance.
+
+  - id: contextual_feedback
+    label: In-app contextual / emoji feedback
+    synonyms:
+      - contextual feedback
+      - emoji feedback
+      - in-app feedback
+      - feedback trigger
+    model_id: z_users_contextual_feedback_details
+    measure_id: unique_users
+    intent: aggregate
+    avoid:
+      - nps form
+      - net promoter
+    description: >-
+      Long-format in-app survey responses (question_text + user_answer).
+      Do NOT use for NPS form free-text questions.
+
+  - id: platform_engagement
+    label: Daily platform time spent
+    synonyms:
+      - time spent on platform
+      - platform engagement
+      - active on platform
+      - daily engagement
+    model_id: y_academy_user_daily_engagement_time_spent
+    measure_id: active_platform_users
+    intent: aggregate
+    description: Users with at least 1 minute platform time on a given day.
+
+  - id: growth_cycle_users
+    label: Growth cycle assignment
+    synonyms:
+      - growth cycle
+      - growth cycles
+      - by growth cycle
+    model_id: z_ccbp_academy_users_master_data
+    intent: breakdown
+    description: Breakdown or count by growth cycle from master data.

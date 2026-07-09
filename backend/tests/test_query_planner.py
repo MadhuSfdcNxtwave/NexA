@@ -29,14 +29,23 @@ def _nps_tables() -> list[SimpleNamespace]:
         SimpleNamespace(
             full_table_id=f"{DATASET}.academy_nps_form_responses",
             included_for_ai=True,
+            column_hints_json="{}",
+            column_descriptions_json="{}",
+            ai_profile_json="{}",
         ),
         SimpleNamespace(
             full_table_id=f"{DATASET}.nps_form_responses_nov_and_dec_2025",
             included_for_ai=True,
+            column_hints_json="{}",
+            column_descriptions_json="{}",
+            ai_profile_json="{}",
         ),
         SimpleNamespace(
             full_table_id=f"{DATASET}.users_contextual_feedback_details",
             included_for_ai=True,
+            column_hints_json="{}",
+            column_descriptions_json="{}",
+            ai_profile_json="{}",
         ),
     ]
 
@@ -115,6 +124,9 @@ class QueryPlannerTests(unittest.TestCase):
         self.assertIn("nps_form_responses_nov_and_dec_2025", low)
         self.assertIn("regexp_contains", low)
         self.assertIn("notice ?board", sql)
+        self.assertIn("notice_board_mentions", sql)
+        self.assertIn("endorsed AS", sql)
+        self.assertIn("old AS", sql)
         self.assertNotIn("users_contextual_feedback_details", low)
         self.assertNotIn("count(distinct", low)
 
@@ -124,6 +136,42 @@ class QueryPlannerTests(unittest.TestCase):
         tables = _nps_tables()
         plan = try_build_measure_plan(NPS_Q, tables, catalog_tables=tables)
         self.assertIsNone(plan)
+
+    def test_planner_sql_passes_validation_with_one_workspace_table(self) -> None:
+        from ask_pipeline import _column_hints_map, _infer_hints_for_tables, _try_planner_sql
+
+        tables = [_nps_tables()[0]]
+        pool = _nps_tables()
+        cols = _nps_columns()
+        inferred, _ = _infer_hints_for_tables(tables)
+        hints = _column_hints_map(tables)
+        sql, reason, picked = _try_planner_sql(
+            NPS_Q, tables, hints, inferred, cols, catalog_tables=pool
+        )
+        self.assertIsNotNone(sql, msg=reason)
+        assert sql is not None
+        self.assertIn("UNION ALL", sql)
+        self.assertIn("nps_form_responses_nov_and_dec_2025", sql)
+        shorts = {t.full_table_id.rsplit(".", 1)[-1] for t in (picked or [])}
+        self.assertIn("nps_form_responses_nov_and_dec_2025", shorts)
+
+    def test_stale_single_table_nps_topic_cache_rejected(self) -> None:
+        from memory_lookup import stored_answer_matches_question
+
+        stale_sql = (
+            "SELECT `user_id`, `rating_on_scale_of_0_to_10` AS nps_rating "
+            "FROM `kossip-helpers.academy_success_ai_analytics_worksapce.academy_nps_form_responses` "
+            "WHERE REGEXP_CONTAINS(CONCAT(COALESCE(`please_share_a_short_noteA_about_what_worked_well_for_you`, ''), "
+            r"' '), r'(?i)(notice board)') LIMIT 200"
+        )
+        self.assertFalse(
+            stored_answer_matches_question(
+                NPS_Q,
+                sql=stale_sql,
+                columns=["user_id", "nps_rating", "feedback_note"],
+                rows=[{"user_id": "u1", "nps_rating": 9}],
+            )
+        )
 
 
 if __name__ == "__main__":
