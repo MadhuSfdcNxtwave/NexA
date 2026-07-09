@@ -1,9 +1,8 @@
 """Deterministic SQL for domain-pinned and compound multi-table domain questions."""
 from __future__ import annotations
 
+import re
 from typing import Any
-
-from ask_plan import domain_table_override
 
 
 def resolve_compound_domain_sql(
@@ -72,6 +71,20 @@ def resolve_compound_domain_sql(
     return None
 
 
+def _join_template_table(question: str, tables: list[Any]) -> Any | None:
+    from join_compose import _find_table
+
+    if re.search(r"\bplaced\b|\bplacement\b", question, re.I):
+        return _find_table(tables, "placements_details")
+    if re.search(r"\bnps\b", question, re.I):
+        return _find_table(tables, "nps_form_responses") or _find_table(tables, "academy_nps")
+    if re.search(r"\blive[\s_-]*class|\battend", question, re.I):
+        return _find_table(tables, "live_classes_attendance")
+    if re.search(r"\bjob\b|\bappli", question, re.I):
+        return _find_table(tables, "jobs_details")
+    return tables[0] if tables else None
+
+
 def resolve_domain_sql(
     question: str,
     tables: list[Any],
@@ -85,10 +98,21 @@ def resolve_domain_sql(
     if compound:
         return compound
 
+    from join_compose import try_compose_join_sql
+
+    join_sql = try_compose_join_sql(question, tables)
+    if join_sql:
+        table = _join_template_table(question, tables)
+        if table:
+            short = table.full_table_id.rsplit(".", 1)[-1]
+            return join_sql, table, f"Join template SQL on `{short}`"
+
     from table_routing import is_compound_domain_question
 
     if is_compound_domain_question(question):
         return None
+
+    from ask_plan import domain_table_override
 
     pinned = domain_table_override(question, tables)
     if not pinned:
@@ -109,6 +133,7 @@ def resolve_domain_sql(
 
 
 def is_domain_question(question: str, tables: list[Any]) -> bool:
+    from ask_plan import domain_table_override
     from table_routing import is_compound_domain_question
 
     if is_compound_domain_question(question):

@@ -9,7 +9,7 @@ import knowledge_base as kb
 from question_intent import question_wants_breakdown
 
 _CROSS_TABLE_DIMS = re.compile(
-    r"\b(gender|retention|coach|institute|growth cycle|graduation|bachelors)\b",
+    r"\b(gender|state|retention|coach|institute|growth cycle|graduation|bachelors)\b",
     re.I,
 )
 

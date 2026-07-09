@@ -1,0 +1,47 @@
+# Single source of truth for business metrics and date keywords.
+# glossary.yaml + table_routing.py remain for routing; this file feeds SQL prompts.
+
+metrics:
+  active_learning_portal_users:
+    table_short: z_ccbp_academy_users_master_data
+    filters:
+      - "pause_status IS NULL"
+      - "learning_portal_onboarding_access_given_datetime IS NOT NULL"
+    description: >-
+      Users with portal onboarding access granted and not paused (~34,791).
+      NOT lp_status=ACTIVE on the engagement table.
+
+  lp_status_active_users:
+    table_short: academy_users_day_and_page_wise_time_spent_details
+    filters:
+      - "lp_status = 'ACTIVE'"
+    description: Use only when question explicitly mentions lp_status.
+
+  placed_user:
+    table_short: y_academy_users_placements_details
+    filters: []
+    description: Presence in placements table indicates a placement record.
+
+  live_class_attendance:
+    table_short: z_academy_users_live_classes_attendance_and_time_spent_details
+    filters:
+      - "attendance_status = 'JOINED'"
+    description: Users who joined a live class session.
+
+  nps_feedback:
+    table_short: nps_all_form_responses
+    filters: []
+    description: NPS form free-text — use UNION across both NPS tables for topic search.
+
+date_keywords:
+  yesterday: "DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)"
+  yestarday: "DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)"
+  today: "CURRENT_DATE()"
+  now: "CURRENT_DATE()"
+  currently: "CURRENT_DATE()"
+  this_month: "DATE_TRUNC(CURRENT_DATE(), MONTH)"
+  this_week: "DATE_TRUNC(CURRENT_DATE(), WEEK)"
+  recent: "DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)"
+  last_7_days: "DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)"
+  last_30_days: "DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)"
+  last_90_days: "DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)"

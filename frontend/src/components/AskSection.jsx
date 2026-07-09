@@ -19,6 +19,8 @@ import {
   subscribeAskJob,
 } from "../askStore.js";
 import { normalizeAskResult, memoryToTurn, mergeTurns } from "../askResult.js";
+import TableMentionInput from "./TableMentionInput.jsx";
+import { extractPinnedTableIds } from "../tableMentions.js";
 
 function FollowUpSuggestions({ suggestions, onPick, disabled }) {
   if (!suggestions?.length) return null;
@@ -76,6 +78,7 @@ export default function AskSection({
   const [threads, setThreads] = useState([]);
   const [turns, setTurns] = useState([]);
   const [q, setQ] = useState("");
+  const [workspaceTables, setWorkspaceTables] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [forceFresh, setForceFresh] = useState(true);
@@ -177,10 +180,14 @@ export default function AskSection({
         next.validationLabel = event.label || "";
         next.phase = "validate";
       }
-      if (event.type === "sql_verified") {
-        next.sqlMessage = event.message;
+      if (event.type === "sql_verified" || event.type === "sql_ready") {
+        next.sqlMessage = event.message || "SQL ready";
         next.verifiedSql = event.sql;
         next.phase = "validate";
+      }
+      if (event.type === "insight") {
+        next.insightPreview = event.data;
+        next.phase = "analyze";
       }
       if (event.type === "running_query") next.phase = "query";
       if (event.type === "analyzing") next.phase = "analyze";
@@ -289,6 +296,7 @@ export default function AskSection({
         clarificationChoice: clarOpts?.clarificationChoice,
         clarificationText: clarOpts?.clarificationText,
         refinedQuestion: clarOpts?.refinedQuestion,
+        pinnedTableIds: extractPinnedTableIds(text, workspaceTables),
       };
 
       let res = isStandalone
@@ -501,6 +509,18 @@ export default function AskSection({
       cancelled = true;
     };
   }, [id, isStandalone, setSearchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.listWorkspaceTables()
+      .then((tables) => {
+        if (!cancelled) setWorkspaceTables(tables || []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -869,11 +889,12 @@ export default function AskSection({
 
           <div className="thread-composer">
             <div className="hero-prompt compact agent-composer">
-              <textarea
+              <TableMentionInput
                 rows={2}
-                placeholder="Ask a data question…"
+                placeholder="Ask a data question… (@table to pin a table)"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={setQ}
+                tables={workspaceTables}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -886,6 +907,7 @@ export default function AskSection({
                   prompt={clarification.prompt}
                   options={clarification.options}
                   allowCustom={clarification.allow_custom !== false}
+                  confirmMode={clarification.confirm_mode === true}
                   originalQuestion={clarification.originalQuestion}
                   loading={loading}
                   onChoose={handleClarification}

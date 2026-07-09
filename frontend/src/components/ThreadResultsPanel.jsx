@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import Chart from "./Chart.jsx";
+import SmartChart from "./visualizations/SmartChart.jsx";
+import InsightCard from "./visualizations/InsightCard.jsx";
 import VizTable from "./VizTable.jsx";
+import SqlNotebookCells from "./SqlNotebookCells.jsx";
 import UsageMeta from "./UsageMeta.jsx";
 import AskProgress from "./AskProgress.jsx";
 
@@ -107,9 +109,12 @@ function TurnResultCard({
 
       {routingLine && <p className="results-routing muted">{routingLine}</p>}
 
-      <div className="results-analysis glass-card">
-        <p>{turn.analysis}</p>
-      </div>
+      <InsightCard
+        analysis={turn.analysis}
+        sqlSource={turn.sql_source}
+        modelUsed={turn.model_used}
+        suggestions={turn.suggestions}
+      />
 
       {showProgress && (
         <div className="results-loading-overlay">
@@ -155,7 +160,12 @@ function TurnResultCard({
 
       {tab === "chart" && hasChart && (
         <section className="results-section glass-card">
-          <Chart spec={turn.chart_spec} rows={turn.rows} vizRows={turn.viz_rows} />
+          <SmartChart
+            columns={turn.columns}
+            rows={turn.viz_rows?.length ? turn.viz_rows : turn.rows}
+            question={turn.question}
+            chartSpec={turn.chart_spec}
+          />
         </section>
       )}
 
@@ -197,12 +207,12 @@ function TurnResultCard({
           ) : (
             <>
               {turn.sql_steps?.length ? (
-                turn.sql_steps.map((step, si) => (
-                  <div key={si} className="sql-chain-step">
-                    <h4 className="sql-chain-step-title">Step {si + 1}: {step.label}</h4>
-                    <pre className="code-block">{step.sql}</pre>
-                  </div>
-                ))
+                <SqlNotebookCells
+                  steps={turn.sql_steps}
+                  combinedSql={turn.sql}
+                  onRunStep={onRerunSql}
+                  rerunDisabled={rerunDisabled}
+                />
               ) : (
                 <pre className="code-block">{turn.sql}</pre>
               )}

@@ -27,27 +27,63 @@ _DATE_COLUMN_CANDIDATES = (
 
 
 def resolve_relative_range(question: str, *, today: date | None = None) -> tuple[date, date] | None:
-    """Map relative phrases to inclusive (start, end) dates."""
+    """Map relative phrases to inclusive (start, end) dates.
+
+    Prefer explicit ranges (last N days) over single-day words (yesterday/today)
+    when both appear — e.g. «yesterday? i want last 2 days data».
+    """
     q = question.lower()
     ref = today or date.today()
 
-    if re.search(r"\byesterday\b", q):
-        d = ref - timedelta(days=1)
-        return d, d
-    if re.search(r"\btoday\b", q):
-        return ref, ref
-    if re.search(r"\blast\s+7\s+days\b|\bpast\s+7\s+days\b", q):
-        return ref - timedelta(days=6), ref
+    # Explicit multi-day ranges first (override yesterday/today if both present).
+    m = re.search(r"\b(?:last|past|previous)\s+(\d+)\s+days?\b", q)
+    if m:
+        n = max(1, int(m.group(1)))
+        return ref - timedelta(days=n - 1), ref
+    # last three months / last 3 months → previous N full calendar months
+    m = re.search(
+        r"\b(?:last|past|previous)\s+"
+        r"(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)\s+months?\b",
+        q,
+    )
+    if m:
+        word = m.group(1).lower()
+        words = {
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+            "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+        }
+        n = words.get(word, int(word) if word.isdigit() else 1)
+        n = max(1, min(n, 24))
+        first_this = ref.replace(day=1)
+        end = first_this - timedelta(days=1)  # last day of previous month
+        # Go back n-1 more months from that month's first day
+        start_month = end.replace(day=1)
+        for _ in range(n - 1):
+            start_month = (start_month - timedelta(days=1)).replace(day=1)
+        return start_month, end
     if re.search(r"\blast\s+week\b|\bpast\s+week\b", q):
         end = ref - timedelta(days=1)
         return end - timedelta(days=6), end
-    if re.search(r"\blast\s+30\s+days\b|\bpast\s+30\s+days\b|\blast\s+month\b|\bpast\s+month\b", q):
+    # Rolling window — keep separate from calendar "last month".
+    if re.search(r"\blast\s+30\s+days\b|\bpast\s+30\s+days\b", q):
         return ref - timedelta(days=29), ref
+    # Previous calendar month (e.g. in July → June 1..30).
+    if re.search(r"\b(?:last|past|previous)\s+month\b", q):
+        first_this = ref.replace(day=1)
+        end = first_this - timedelta(days=1)
+        start = end.replace(day=1)
+        return start, end
     if re.search(r"\bthis\s+week\b", q):
         start = ref - timedelta(days=ref.weekday())
         return start, ref
     if re.search(r"\bthis\s+month\b|\bcurrent\s+month\b|\bmtd\b", q):
         return ref.replace(day=1), ref
+
+    if re.search(r"\byesterday\b|\byestarday\b|\byesterdy\b|\byesturday\b", q):
+        d = ref - timedelta(days=1)
+        return d, d
+    if re.search(r"\btoday\b", q):
+        return ref, ref
     return None
 
 

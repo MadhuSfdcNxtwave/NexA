@@ -432,6 +432,69 @@ body {
   z-index: 10;
 }
 
+.table-mention-wrap {
+  position: relative;
+}
+
+.table-mention-wrap textarea {
+  width: 100%;
+}
+
+.table-mention-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--glass-bg-strong, #fff);
+  border: 1px solid var(--glass-border, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--glass-shadow, 0 8px 24px rgba(15, 23, 42, 0.12));
+  z-index: 30;
+}
+
+.table-mention-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.table-mention-menu button.active,
+.table-mention-menu button:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.table-mention-short {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.table-mention-badge {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6366f1;
+}
+
+.table-mention-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
 .hero-prompt.compact {
   background: var(--glass-bg-strong);
   backdrop-filter: var(--glass-blur);

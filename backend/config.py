@@ -103,6 +103,14 @@ HEX_STYLE_PIPELINE = os.environ.get("HEX_STYLE_PIPELINE", "true").strip().lower(
     "true",
     "yes",
 )
+GLOSSARY_ENABLED = os.environ.get(
+    "GLOSSARY_ENABLED",
+    "true" if HEX_STYLE_PIPELINE else "false",
+).strip().lower() in ("1", "true", "yes")
+TERM_RESOLVER_ENABLED = os.environ.get(
+    "TERM_RESOLVER_ENABLED",
+    "true" if HEX_STYLE_PIPELINE else "false",
+).strip().lower() in ("1", "true", "yes")
 # Table routing: retrieval (vector first, keyword fallback) | vector | llm | hybrid
 TABLE_ROUTER_MODE = os.environ.get(
     "TABLE_ROUTER_MODE",
@@ -129,6 +137,21 @@ ROUTING_FUSION_ENABLED = os.environ.get(
 ROUTING_TOP_K = int(os.environ.get("ROUTING_TOP_K", "8"))
 ROUTING_VECTOR_WEIGHT = float(os.environ.get("ROUTING_VECTOR_WEIGHT", "0.55"))
 ROUTING_KEYWORD_WEIGHT = float(os.environ.get("ROUTING_KEYWORD_WEIGHT", "0.35"))
+# Skip LLM table disambiguation when fused metadata score is clearly ahead.
+ROUTING_AUTO_PICK_ENABLED = os.environ.get("ROUTING_AUTO_PICK_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+ROUTING_AUTO_PICK_GAP = float(os.environ.get("ROUTING_AUTO_PICK_GAP", "0.12"))
+# Extra fused-score boost for endorsed (curated) tables — Hex-style curation.
+ROUTING_ENDORSED_FUSION_BOOST = float(os.environ.get("ROUTING_ENDORSED_FUSION_BOOST", "0.15"))
+# When fused/vector ranking is ambiguous, try keyword metadata before LLM router.
+ROUTING_METADATA_BACKUP_ENABLED = os.environ.get(
+    "ROUTING_METADATA_BACKUP_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes")
+ROUTING_METADATA_MIN_SCORE = int(os.environ.get("ROUTING_METADATA_MIN_SCORE", "20"))
+ROUTING_METADATA_SCORE_GAP = int(os.environ.get("ROUTING_METADATA_SCORE_GAP", "12"))
 
 # Legacy KB full-article router (disabled when fusion routing is on).
 KB_AI_ROUTING = os.environ.get(
@@ -202,7 +225,7 @@ SQL_CHAIN_PLANNER = os.environ.get(
     "SQL_CHAIN_PLANNER",
     "rules" if HEX_STYLE_PIPELINE else "llm",
 ).strip().lower()
-SQL_CHAIN_MAX_STEPS = int(os.environ.get("SQL_CHAIN_MAX_STEPS", "3"))
+SQL_CHAIN_MAX_STEPS = int(os.environ.get("SQL_CHAIN_MAX_STEPS", "5"))
 CACHE_ANSWER_ENABLED = os.environ.get("CACHE_ANSWER_ENABLED", "true").strip().lower() in (
     "1",
     "true",
@@ -210,6 +233,25 @@ CACHE_ANSWER_ENABLED = os.environ.get("CACHE_ANSWER_ENABLED", "true").strip().lo
 )
 MEMORY_MAX_ROWS = int(os.environ.get("MEMORY_MAX_ROWS", "500"))
 NOTEBOOK_MAX_ROWS = int(os.environ.get("NOTEBOOK_MAX_ROWS", "2000"))
+
+# Schema explorer agent: per-table context cache TTL (sample values, date ranges).
+SCHEMA_CACHE_TTL_HOURS = float(os.environ.get("SCHEMA_CACHE_TTL_HOURS", "6"))
+
+# Pattern miner: self-learning SQL templates from verification logs.
+PATTERN_MINER_MATCH_THRESHOLD = float(os.environ.get("PATTERN_MINER_MATCH_THRESHOLD", "0.65"))
+PATTERN_MINER_REFRESH_MINUTES = float(os.environ.get("PATTERN_MINER_REFRESH_MINUTES", "30"))
+PATTERN_MINER_MIN_OCCURRENCES = int(os.environ.get("PATTERN_MINER_MIN_OCCURRENCES", "3"))
+TEMPLATE_PROMOTER_THRESHOLD = int(os.environ.get("TEMPLATE_PROMOTER_THRESHOLD", "3"))
+AGENTS_PIPELINE_ENABLED = os.environ.get("AGENTS_PIPELINE_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+ENABLE_STREAMING = os.environ.get("ENABLE_STREAMING", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # Verbose ask-pipeline tracing (routing, semantic SQL, preflight) → ask-debug.log + console.
 ASK_DEBUG_LOG = os.environ.get("ASK_DEBUG_LOG", "false").strip().lower() in (

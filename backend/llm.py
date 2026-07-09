@@ -232,12 +232,15 @@ def _fetch(
     temperature: float = 0.0,
     *,
     max_tokens: int | None = None,
+    model: str | None = None,
+    provider: str | None = None,
 ) -> str:
-    provider = _resolve_provider("fetch")
+    provider = _normalize_provider(provider or _resolve_provider("fetch"))
+    model_id = _normalize_model(provider, model or config.FETCH_MODEL)
     cap = max_tokens if max_tokens is not None else config.OPENAI_MAX_TOKENS
     return _generate(
         provider,
-        config.FETCH_MODEL,
+        model_id,
         prompt,
         system,
         temperature,
@@ -369,6 +372,8 @@ def question_to_sql(
     chain_context: str = "",
     sql_entity_hint: str = "",
     temperature: float = 0.0,
+    model: str | None = None,
+    provider: str | None = None,
 ) -> str:
     error_block = (
         f"# Previous SQL failed\nFix the query. Error:\n{prior_error}\n\n"
@@ -397,7 +402,55 @@ def question_to_sql(
         + f"# Question\n{question}\n\n# SQL"
     )
     # Structured CTE queries over wide feedback tables can be long — allow room.
-    return _fetch(prompt, system=SQL_SYSTEM, temperature=temperature, max_tokens=4096)
+    return _fetch(
+        prompt,
+        system=SQL_SYSTEM,
+        temperature=temperature,
+        max_tokens=4096,
+        model=model,
+        provider=provider,
+    )
+
+
+_REWRITE_SYSTEM = (
+    "You fix BigQuery SQL queries. Output ONLY corrected SQL — no prose, no markdown fences."
+)
+
+
+def rewrite_sql(
+    question: str,
+    sql: str,
+    schema_context: str,
+    *,
+    issues: list[str],
+    model: str | None = None,
+    provider: str | None = None,
+) -> str:
+    """Rewrite SQL to fix validation issues (QueryCritic self-correction)."""
+    issue_block = "\n".join(f"- {i}" for i in issues)
+    prompt = (
+        f"The following SQL has these problems:\n{issue_block}\n\n"
+        f"Original question: {question}\n\n"
+        f"Schema:\n{schema_context[:12000]}\n\n"
+        f"Current SQL:\n{sql}\n\n"
+        "Rewrite the SQL to fix ALL problems. Output BigQuery SQL only."
+    )
+    raw = _fetch(
+        prompt,
+        system=_REWRITE_SYSTEM,
+        temperature=0.0,
+        max_tokens=4096,
+        model=model,
+        provider=provider,
+    )
+    return _strip_sql_fences(raw)
+
+
+def _strip_sql_fences(text: str) -> str:
+    t = (text or "").strip()
+    t = re.sub(r"^```(?:sql)?\s*", "", t, flags=re.I)
+    t = re.sub(r"\s*```$", "", t)
+    return t.strip()
 
 
 TABLE_ROUTER_SYSTEM = (
@@ -653,19 +706,24 @@ def result_to_chart_spec(question: str, columns: list[str], sample_rows: list[di
 # 3. VIZ: result -> written analysis
 # --------------------------------------------------------------------------
 ANALYSIS_SYSTEM = (
-    "You are NexA — an analytics copilot with Cursor-like clarity.\n"
+    "You are NexA — an intelligent analytics copilot (think Jarvis for data).\n"
     "Rules:\n"
+    "- Answer EVERY part of the user's question. Do not skip dimensions they asked about.\n"
+    "- Structure your response naturally covering:\n"
+    "  (1) Direct answer — headline finding first\n"
+    "  (2) What happened — key numbers and patterns from the data\n"
+    "  (3) Why it matters — business interpretation\n"
+    "  (4) How to read it — what was measured, in plain English\n"
+    "  (5) Caveats — limitations or what the data cannot tell us\n"
+    "- For 'which X' questions, name the top categories with their values.\n"
     "- For company/placement questions with a per-company table, lead with how many "
     "distinct companies and total students placed, then highlight top companies.\n"
-    "- If conversation history is provided and the question builds on it, "
-    "briefly connect to what was discussed before.\n"
-    "- For multi-part questions (e.g. companies AND placements AND salary bands), "
-    "answer EVERY part with its number — never say a metric is 'not specified' "
-    "when the data includes it.\n"
-    "- Explain what the numbers mean for the business in plain English.\n"
+    "- If conversation history is provided, briefly connect to prior context.\n"
+    "- For multi-part questions, answer EVERY part with its number.\n"
     "- Never mention SQL, tables, columns, BigQuery, or internal row counts.\n"
     "- Do NOT invent trends, comparisons, or numbers not in the data.\n"
-    "- 3–5 short sentences. Conversational, precise, no markdown headers.\n"
+    "- Use 6–10 sentences for breakdowns or analytical questions; 5–7 for single metrics.\n"
+    "- Conversational, precise, no markdown headers.\n"
 )
 
 
@@ -679,6 +737,8 @@ def analyze(
     presentation_hints: list[str] | None = None,
     entity_label: str = "",
     conversation_context: str = "",
+    glossary_context: str = "",
+    query_reason: str = "",
 ) -> str:
     hints = "\n".join(f"- {h}" for h in (presentation_hints or []))
     entity_block = f"Topic: {entity_label}\n" if entity_label else ""
@@ -687,13 +747,22 @@ def analyze(
         if (conversation_context or "").strip()
         else ""
     )
+    glossary_block = (
+        f"\nBusiness context (use for interpretation, do not quote verbatim):\n"
+        f"{glossary_context.strip()}\n"
+        if (glossary_context or "").strip()
+        else ""
+    )
+    reason_block = (
+        f"\nQuery intent: {query_reason.strip()}\n" if (query_reason or "").strip() else ""
+    )
     sql_block = (
         f"(Internal context only — do not mention in answer: query targets {entity_label or 'the requested metric'}.)\n"
         if sql
         else ""
     )
     prompt = (
-        f"Question: {question}\n{entity_block}{conv_block}{sql_block}"
+        f"Question: {question}\n{entity_block}{conv_block}{glossary_block}{reason_block}{sql_block}"
         f"Returned {row_count} rows. Columns: {columns}\n"
         f"Data (sample): {json.dumps(sample_rows, default=str)[:5000]}\n"
     )
@@ -746,6 +815,8 @@ def build_presentation(
     entity_label: str = "",
     presentation_hints: list[str] | None = None,
     conversation_context: str = "",
+    glossary_context: str = "",
+    query_reason: str = "",
 ) -> tuple[list[dict], dict, str]:
     """Chart spec + dashboard prep + business-friendly analysis."""
     from chart_prepare import prepare_chart
@@ -773,6 +844,8 @@ def build_presentation(
             presentation_hints=presentation_hints,
             entity_label=entity_label,
             conversation_context=conversation_context,
+            glossary_context=glossary_context,
+            query_reason=query_reason,
         )
     return viz_rows, chart_spec, analysis
 
@@ -787,11 +860,26 @@ EXPLAIN_SYSTEM = (
 )
 
 ASSISTANT_SYSTEM = (
-    "You are NexA, a virtual analytics assistant. The user's message is conversational "
-    "or about how to use the product — not a direct data question. Answer helpfully: "
-    "explain what you can do (natural-language questions → SQL → charts), how Thread "
-    "memory works, or clarify their message. Keep it brief (2-4 sentences). "
-    "If they seem stuck, mention they can ask data questions in plain English."
+    "You are NexA — an intelligent analytics assistant (like Jarvis for data teams).\n"
+    "The user's message is conversational or about how to use the product.\n"
+    "Answer warmly and helpfully:\n"
+    "- Explain what NexA can do: natural-language questions → SQL → charts and insights\n"
+    "- Clarify Thread memory, table pinning (@table), and how to ask better questions\n"
+    "- If they greet you, respond naturally and offer to help with data\n"
+    "- Use 3–5 sentences. Be confident, clear, and approachable — not robotic.\n"
+)
+
+KNOWLEDGE_SYSTEM = (
+    "You are NexA — an intelligent analytics assistant (like Jarvis for data teams).\n"
+    "The user is asking for a definition, abbreviation, or concept explanation — "
+    "NOT requesting a warehouse query.\n"
+    "Rules:\n"
+    "- Explain clearly what the term/concept means in this analytics context\n"
+    "- If glossary context is provided, use it as the authoritative source\n"
+    "- Mention how the user might query it in NexA if relevant (e.g. 'ask: average NPS by month')\n"
+    "- Cover: what it is, why it matters, and how it's typically measured\n"
+    "- Do not invent specific numbers or run pretend queries\n"
+    "- 4–8 sentences. Conversational, precise, no markdown headers.\n"
 )
 
 SUGGESTIONS_SYSTEM = (
@@ -936,6 +1024,21 @@ def assistant_reply(question: str, context: str = "") -> str:
     ctx = f"Project context:\n{context[:4000]}\n\n" if context.strip() else ""
     prompt = f"{ctx}User: {question}\n\nReply:"
     return _viz(prompt, system=ASSISTANT_SYSTEM, temperature=0.3)
+
+
+def knowledge_reply(
+    question: str,
+    glossary_context: str = "",
+    project_context: str = "",
+) -> str:
+    blocks: list[str] = []
+    if (project_context or "").strip():
+        blocks.append(f"Project context:\n{project_context[:3000]}")
+    if (glossary_context or "").strip():
+        blocks.append(f"Glossary / business definitions:\n{glossary_context.strip()}")
+    blocks.append(f"User question: {question}\n\nExplain:")
+    prompt = "\n\n".join(blocks)
+    return _viz(prompt, system=KNOWLEDGE_SYSTEM, temperature=0.25)
 
 
 def sql_failure_reply(

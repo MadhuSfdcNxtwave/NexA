@@ -103,8 +103,8 @@ def sql_intent_mismatch_reason(
         q,
         re.I,
     ) and re.search(r"\bhow many\b|\bcount\b|\bnumber of\b", q, re.I):
-        if not active_portal_sql_shape_ok(sql_text):
-            return "active portal user count requires lp_status = ACTIVE on engagement table"
+        if not active_portal_sql_shape_ok(sql_text, question=q):
+            return "active portal user count requires master-data or lp_status SQL"
 
     if question_asks_growth_cycle_count(q):
         if re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I):
@@ -114,6 +114,13 @@ def sql_intent_mismatch_reason(
 
     if question_wants_breakdown(q) and not re.search(r"\bGROUP BY\b", sql_text, re.I):
         return "breakdown question requires GROUP BY"
+
+    if re.search(r"^\s*(which|what)\b", q, re.I) and re.search(
+        r"\b(activity|aspect|feature|page|category|program|improv)\b", q, re.I
+    ):
+        if re.search(r"SELECT\s+COUNT\s*\(\s*(?:DISTINCT\s+)?", sql_text, re.I):
+            if not re.search(r"\bGROUP BY\b", sql_text, re.I):
+                return "'which/what' question requires GROUP BY breakdown, not scalar COUNT"
 
     if re.search(r"COUNT\s*\(\s*DISTINCT\s+['\"]", sql_text, re.I):
         return "COUNT(DISTINCT 'literal') is invalid"
@@ -129,6 +136,16 @@ def sql_intent_mismatch_reason(
             r"COUNTIF|promoter|detractor|nps_score", sql_text, re.I
         ):
             return "NPS score questions need COUNTIF/promoter logic, not AVG alone"
+
+    # NPS score / monthly NPS must not collapse to unique_responders COUNT.
+    if re.search(r"\bnps\b", q, re.I) and re.search(
+        r"\b(score|scores|rating|monthly|last\s+\w+\s+months?)\b", q, re.I
+    ):
+        if re.search(r"unique_responders|COUNT\s*\(\s*DISTINCT\s+[`\"]?user_id", sql_text, re.I):
+            if not re.search(r"nps_score|COUNTIF|promoter|detractor", sql_text, re.I):
+                return "NPS score question must compute nps_score, not unique_responders count"
+        if re.search(r"\bmonth", q, re.I) and not re.search(r"\bGROUP BY\b", sql_text, re.I):
+            return "monthly NPS scores require GROUP BY month"
 
     return None
 

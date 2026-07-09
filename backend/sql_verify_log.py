@@ -28,12 +28,15 @@ def log_sql_verification(
     issues: list[str] | None = None,
     source: str = "",
     plan: dict[str, Any] | None = None,
+    result_row_count: int | None = None,
+    model_used: str = "",
 ) -> None:
     if not audit or not audit.db:
         return
     payload: dict[str, Any] = {"issues": issues or []}
     if plan:
         payload["plan"] = plan
+    issue_list = issues or []
     row = SqlVerificationLog(
         project_id=audit.project_id,
         user_id=audit.user_id,
@@ -45,7 +48,10 @@ def log_sql_verification(
         issues_json=json.dumps(payload),
         source=(source or "")[:40],
         llm_provider=config.SQL_PROVIDER or config.FETCH_PROVIDER,
-        llm_model=config.FETCH_MODEL,
+        llm_model=model_used or config.FETCH_MODEL,
+        model_used=(model_used or config.FETCH_MODEL)[:100],
+        result_row_count=result_row_count,
+        issues_count=len(issue_list),
     )
     audit.db.add(row)
     try:

@@ -18,7 +18,8 @@ import {
   matchesAskJob,
   subscribeAskJob,
 } from "../askStore.js";
-import { normalizeAskResult, memoryToTurn } from "../askResult.js";
+import SqlNotebookCells from "./SqlNotebookCells.jsx";
+import { extractPinnedTableIds } from "../tableMentions.js";
 
 function FollowUpSuggestions({ suggestions, onPick, disabled }) {
   if (!suggestions?.length) return null;
@@ -61,6 +62,7 @@ export default function ThreadAgentPanel({
   const [askProgress, setAskProgress] = useState(null);
   const [clarification, setClarification] = useState(null);
   const [pendingQ, setPendingQ] = useState("");
+  const [workspaceTables, setWorkspaceTables] = useState([]);
   const chatEndRef = useRef(null);
 
   const threadHref = `/projects/${projectId}${threadIdProp ? `?thread=${threadIdProp}` : ""}`;
@@ -192,6 +194,7 @@ export default function ThreadAgentPanel({
         clarificationChoice: clarOpts?.clarificationChoice,
         clarificationText: clarOpts?.clarificationText,
         refinedQuestion: clarOpts?.refinedQuestion,
+        pinnedTableIds: extractPinnedTableIds(text, workspaceTables),
       });
       if (activeIdRef.current !== pid) return;
       if (clarPayload) {
@@ -243,6 +246,18 @@ export default function ThreadAgentPanel({
       refinedQuestion,
     });
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    api.listWorkspaceTables()
+      .then((tables) => {
+        if (!cancelled) setWorkspaceTables(tables || []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,9 +344,13 @@ export default function ThreadAgentPanel({
                 <Chart spec={t.chart_spec} rows={t.rows} vizRows={t.viz_rows} />
               )}
               {t.sql && (
-                <details className="sql-details">
-                  <summary>SQL</summary>
-                  <pre className="code-block">{t.sql}</pre>
+                <details className="sql-details" open={!!t.sql_steps?.length}>
+                  <summary>SQL{t.sql_steps?.length ? ` (${t.sql_steps.length} cells)` : ""}</summary>
+                  {t.sql_steps?.length ? (
+                    <SqlNotebookCells steps={t.sql_steps} combinedSql={t.sql} />
+                  ) : (
+                    <pre className="code-block">{t.sql}</pre>
+                  )}
                 </details>
               )}
               <FollowUpSuggestions
@@ -367,11 +386,12 @@ export default function ThreadAgentPanel({
       </div>
 
       <div className="notebook-agent-composer">
-        <textarea
+        <TableMentionInput
           rows={2}
-          placeholder="Ask a data question…"
+          placeholder="Ask a data question… (@table to pin a table)"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={setQ}
+          tables={workspaceTables}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -384,6 +404,7 @@ export default function ThreadAgentPanel({
             prompt={clarification.prompt}
             options={clarification.options}
             allowCustom={clarification.allow_custom !== false}
+            confirmMode={clarification.confirm_mode === true}
             originalQuestion={clarification.originalQuestion}
             loading={loading}
             onChoose={handleClarification}

@@ -49,6 +49,15 @@ _PORTAL_ACTIVE = re.compile(
     r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",
     re.I,
 )
+_PORTAL_ACTIVITY = re.compile(
+    r"\b(which|what)\s+(activity|activities|page|pages)\b|"
+    r"\bin which activity\b|"
+    r"\bactivity\b.{0,50}\b(?:learning[\s_-]*portal|learningportal|portal)\b|"
+    r"\b(?:learning[\s_-]*portal|learningportal|portal)\b.{0,50}\b(activity|activit|page|events)\b|"
+    r"\bactiv(?:e|ly|lly)\s+in\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b|"
+    r"\bevents?\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -137,6 +146,14 @@ def classify_intent(question: str) -> str:
     if is_compound_domain_question(q):
         return "compound"
 
+    if _PORTAL_ACTIVITY.search(q):
+        return "breakdown"
+
+    from question_intent import question_wants_breakdown
+
+    if question_wants_breakdown(q) and _NPS.search(q):
+        return "breakdown"
+
     topic = extract_topic(q)
     if topic and not _AGG_BLOCK.search(q):
         return "topic_search"
@@ -196,15 +213,19 @@ def nps_topic_sql_shape_ok(
     return True
 
 
-def active_portal_sql_shape_ok(sql: str) -> bool:
-    """True when SQL counts active portal users via lp_status, not master-data access."""
+def active_portal_sql_shape_ok(sql: str, *, question: str = "") -> bool:
+    """True when SQL matches canonical active portal definition (master or lp_status)."""
     sql_l = (sql or "").lower()
+    q = (question or "").lower()
     if not sql_l:
         return False
-    if "lp_status" in sql_l and "active" in sql_l:
-        return True
+    if re.search(r"\blp_status\b|\blp status\b", q):
+        return "lp_status" in sql_l and "active" in sql_l
+    # Canonical: master data — not paused + portal access granted
+    if "master_data" in sql_l or "pause_status" in sql_l:
+        return "pause_status" in sql_l and "is null" in sql_l
     if "day_and_page_wise" in sql_l and "lp_status" in sql_l:
-        return True
+        return "active" in sql_l
     return False
 
 
@@ -236,13 +257,16 @@ def sql_plan_shape_mismatch_reason(
         return "breakdown intent requires GROUP BY"
 
     if (
-        plan.model_id == "academy_users_day_and_page_wise_time_spent_details"
+        plan.model_id in (
+            "academy_users_day_and_page_wise_time_spent_details",
+            "z_ccbp_academy_users_master_data",
+        )
         or plan.measure_id == "active_learning_portal_users"
         or _PORTAL_ACTIVE.search(q)
     ):
         if _PORTAL_ACTIVE.search(q) and re.search(r"\bhow many\b|\bcount\b|\bnumber of\b", q, re.I):
-            if not active_portal_sql_shape_ok(sql_text):
-                return "active portal user count requires lp_status = ACTIVE on engagement table"
+            if not active_portal_sql_shape_ok(sql_text, question=q):
+                return "active portal user count requires master-data or lp_status SQL"
 
     return None
 
@@ -409,14 +433,6 @@ def try_build_query_plan(
             return None
         mp = try_build_measure_plan(q, [table_for_measure], catalog_tables=pool)
         if not mp:
-            if _PORTAL_ACTIVE.search(q) and semantic.model_id == "academy_users_day_and_page_wise_time_spent_details":
-                return QueryPlan(
-                    model_id=semantic.model_id,
-                    intent="aggregate",
-                    measure_id="active_learning_portal_users",
-                    filters=routing_filters or ["`lp_status` = 'ACTIVE'"],
-                    reason="Active learning portal users (lp_status = ACTIVE)",
-                )
             return None
         dims = list(mp.group_by)
         if intent == "breakdown" and not dims:
@@ -427,6 +443,9 @@ def try_build_query_plan(
                     if d.id.lower() == token or token in d.id.lower():
                         dims = [d.id]
                         break
+        if intent == "breakdown" and not dims and _PORTAL_ACTIVITY.search(q):
+            if semantic.model_id == "academy_users_day_and_page_wise_time_spent_details":
+                dims = ["time_spent_page"]
         merged_filters = list(mp.filters)
         for f in routing_filters:
             if f not in merged_filters:
@@ -452,12 +471,36 @@ def analyze_question(
     columns_by_table: dict[str, set[str]] | None = None,
 ) -> QueryPlan | None:
     """
-    Unified intent analyzer — merges ask_context entity, table_routing signals,
-    question_intent breakdown flags, and YAML semantic model selection.
+    Unified intent analyzer — glossary resolver first, then semantic planner fallback.
     """
+    import os
+
     q = (question or "").strip()
     if not q:
         return None
+
+    use_resolver = os.environ.get("TERM_RESOLVER_ENABLED", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if use_resolver:
+        from term_resolver import resolve
+
+        resolved = resolve(
+            q,
+            selected_tables,
+            catalog_tables=catalog_tables,
+            columns_by_table=columns_by_table,
+        )
+        if resolved:
+            plan = resolved.to_query_plan()
+            plan.entity = resolved.entity or plan.entity
+            plan.viz_hint = resolved.viz_hint or plan.viz_hint
+            plan.domain_signals = list(resolved.domain_signals)
+            if resolved.glossary_terms:
+                plan.reason = resolved.reason or plan.reason
+            return plan
 
     plan = try_build_query_plan(
         q,

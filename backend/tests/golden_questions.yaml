@@ -13,14 +13,13 @@
 
 - question: "How many active users in learning portal now?"
   expect_tables:
-    - academy_users_day_and_page_wise_time_spent_details
+    - z_ccbp_academy_users_master_data
   expect_sql_contains:
-    - lp_status
-    - ACTIVE
+    - pause_status
   expect_sql_not_contains:
-    - pause_status IS NULL
+    - lp_status
   expect_intent: aggregate
-  expect_model: academy_users_day_and_page_wise_time_spent_details
+  expect_model: z_ccbp_academy_users_master_data
   expect_measure: active_learning_portal_users
 
 - question: "What is the average NPS score by form submission month?"

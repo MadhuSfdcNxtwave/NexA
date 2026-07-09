@@ -350,6 +350,7 @@ class AskRequest(BaseModel):
     clarification_choice: str | None = None
     clarification_text: str | None = None
     refined_question: str | None = None
+    pinned_table_ids: list[str] = Field(default_factory=list)
 
 
 class ClarificationOption(BaseModel):

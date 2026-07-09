@@ -77,6 +77,13 @@ def _nps_columns() -> dict[str, set[str]]:
             "time_spent_page",
             "time_spent_in_mins",
         },
+        f"{DATASET}.z_ccbp_academy_users_master_data": {
+            "user_id",
+            "pause_status",
+            "learning_portal_onboarding_access_given_datetime",
+            "gender",
+            "growth_cycle_title",
+        },
     }
 
 
@@ -146,6 +153,7 @@ class GoldenSqlTests(unittest.TestCase):
         self.assertIsNotNone(plan)
         assert plan is not None
         self.assertEqual(plan.viz_hint, "scalar")
+        self.assertEqual(plan.model_id, "z_ccbp_academy_users_master_data")
         self.assertEqual(plan.measure_id, "active_learning_portal_users")
 
 

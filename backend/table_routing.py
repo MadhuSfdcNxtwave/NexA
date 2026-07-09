@@ -36,11 +36,12 @@ class RoutingRule:
     score_penalty_shorts: tuple[str, ...] = field(default_factory=tuple)
 
 
-_PORTAL = re.compile(
+_PORTAL_ACTIVE_COUNT = re.compile(
     r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"
     r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",
     re.I,
 )
+_LP_STATUS = re.compile(r"\blp_status\b|\blp status\b", re.I)
 
 _ATTEND = re.compile(r"\battend(?:ance|ed|ing)?\b", re.I)
 _LIVE_CLASS = re.compile(r"\blive[\s_-]*class", re.I)
@@ -70,6 +71,10 @@ _COMPOUND_TABLES: dict[frozenset[str], tuple[str, ...]] = {
         "y_academy_user_daily_engagement_time_spent",
         "z_ccbp_academy_users_master_data",
     ),
+    frozenset({"portal_page_activity", "live_class_attendance"}): (
+        "academy_users_day_and_page_wise_time_spent_details",
+        "z_academy_users_live_classes_attendance_and_time_spent_details",
+    ),
 }
 
 ROUTING_RULES: tuple[RoutingRule, ...] = (
@@ -82,10 +87,21 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
         score_penalty_shorts=("cloudwatch", "question_wise", "virtual_meet"),
     ),
     RoutingRule(
+        id="learning_portal_active_users",
+        table_short="z_ccbp_academy_users_master_data",
+        question_re=_PORTAL_ACTIVE_COUNT,
+        reason="Active learning portal users (master profile — not paused, access granted)",
+        filters=(
+            SqlFilter("pause_status", "IS NULL"),
+            SqlFilter("learning_portal_onboarding_access_given_datetime", "IS NOT NULL"),
+        ),
+        score_penalty_shorts=("question_wise", "question_set", "day_and_page_wise"),
+    ),
+    RoutingRule(
         id="learning_portal_lp_status_active",
         table_short="academy_users_day_and_page_wise_time_spent_details",
-        question_re=_PORTAL,
-        reason="Active learning portal users (lp_status = ACTIVE)",
+        question_re=_LP_STATUS,
+        reason="Portal lp_status enum (engagement table — use only when lp_status is explicit)",
         filters=(SqlFilter("lp_status", "=", "ACTIVE"),),
         score_penalty_shorts=("question_wise", "question_set", "master_data", "cloudwatch"),
     ),
@@ -112,7 +128,8 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
         table_short="academy_nps_form_responses",
         question_re=re.compile(
             r"\bnps\s+form|\bnps\b.{0,40}\bform\s+responses?|"
-            r"\bnet promoter\b.{0,40}\bfeedback\b",
+            r"\bnet promoter\b.{0,40}\bfeedback\b|"
+            r"\bnps\b.{0,40}\bfeedback\b|\bfeedback\b.{0,40}\bnps\b",
             re.I,
         ),
         reason="NPS form free-text responses",
@@ -121,9 +138,22 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
     RoutingRule(
         id="contextual_feedback",
         table_short="users_contextual_feedback_details",
-        question_re=re.compile(r"\bfeedback\b|\bemoji\b", re.I),
+        question_re=re.compile(r"\b(feedback|emoji)\b", re.I),
         reason="Contextual feedback responses",
         score_penalty_shorts=("nps_form", "cloudwatch"),
+    ),
+    RoutingRule(
+        id="learning_portal_page_activity",
+        table_short="academy_users_day_and_page_wise_time_spent_details",
+        question_re=re.compile(
+            r"\b(?:learning[\s_-]*portal|learningportal|portal)\b.{0,60}\b(activity|activit|page|events?|which)\b|"
+            r"\b(which|what)\b.{0,40}\b(activity|page)\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b|"
+            r"\bactiv(?:e|ly|lly)\s+in\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b|"
+            r"\bevents?\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b",
+            re.I,
+        ),
+        reason="Learning portal page/activity breakdown (time_spent_page)",
+        score_penalty_shorts=("event_engagement", "cloudwatch", "nw_events"),
     ),
 )
 
@@ -142,16 +172,29 @@ def detect_domain_signals(question: str) -> set[str]:
     signals: set[str] = set()
     if _ATTEND.search(q) or (_LIVE_CLASS.search(q) and re.search(r"\bclass", q, re.I)):
         signals.add("live_class_attendance")
-    if _PORTAL.search(q):
+    if _PORTAL_ACTIVE_COUNT.search(q):
         signals.add("learning_portal")
     elif _PORTAL_MENTION.search(q) and (
         _PORTAL_ACCESS.search(q) or re.search(r"\band\b", q, re.I)
     ):
         signals.add("learning_portal")
+    if _PORTAL_MENTION.search(q) and re.search(
+        r"\bactivity|activit|which\s+page|page\b|events?\b|actively\b",
+        q,
+        re.I,
+    ):
+        signals.add("portal_page_activity")
+    if re.search(r"\battendance\b|\battend(?:ed|ance)?\b", q, re.I) and re.search(
+        r"\bpercent|percentage|%\b",
+        q,
+        re.I,
+    ):
+        signals.add("live_class_attendance")
     if _PLATFORM_ACTIVE.search(q):
         signals.add("platform_active")
     if re.search(
-        r"\bnps\s+form|\bnps_form_responses|net promoter\b.{0,40}\bform\b",
+        r"\bnps\s+form|\bnps_form_responses|net promoter\b.{0,40}\bform\b|"
+        r"\bnps\b.{0,40}\bfeedback\b|\bfeedback\b.{0,40}\bnps\b",
         q,
         re.I,
     ):
@@ -169,6 +212,8 @@ def is_compound_domain_question(question: str) -> bool:
     key = frozenset(signals)
     if key in _COMPOUND_TABLES:
         return True
+    if frozenset({"portal_page_activity", "live_class_attendance"}).issubset(signals):
+        return True
     # Any attend + portal-like combo is compound even if wording varies.
     return "live_class_attendance" in signals and "learning_portal" in signals
 
@@ -179,6 +224,8 @@ def compound_domain_table_shorts(question: str) -> tuple[str, ...]:
     key = frozenset(signals)
     if key in _COMPOUND_TABLES:
         return _COMPOUND_TABLES[key]
+    if frozenset({"portal_page_activity", "live_class_attendance"}).issubset(signals):
+        return _COMPOUND_TABLES[frozenset({"portal_page_activity", "live_class_attendance"})]
     if "live_class_attendance" in signals and "learning_portal" in signals:
         return _COMPOUND_TABLES[frozenset({"live_class_attendance", "learning_portal"})]
     return tuple()
@@ -205,8 +252,11 @@ def match_routing_rule(question: str) -> RoutingRule | None:
     if not q:
         return None
     for rule in ROUTING_RULES:
-        if rule.question_re.search(q):
-            return rule
+        if not rule.question_re.search(q):
+            continue
+        if rule.id == "contextual_feedback" and re.search(r"\bnps\b", q, re.I):
+            continue
+        return rule
     return None
 
 

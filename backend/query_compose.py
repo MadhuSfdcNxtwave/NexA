@@ -4,10 +4,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from measure_router import try_build_measure_plan
+from measure_router import MeasurePlan, try_build_measure_plan
 from query_planner import QueryPlan
-from semantic_layer import TableSemantic, load_semantic_catalog, semantic_by_model_id, semantic_for_table
-from sql_composer import compose_sql
+from semantic_layer import MeasureDef, TableSemantic, load_semantic_catalog, semantic_by_model_id, semantic_for_table
+from sql_composer import compose_breakdown_with_join, compose_sql
 
 # Default NPS union alignment when logical model metadata is loaded.
 _NPS_UNION_ALIGN: dict[str, list[str]] = {
@@ -271,6 +271,150 @@ def compose_survey_distribution(
     return try_build_feedback_sql(question, tables, columns_by_table)
 
 
+def tables_and_columns_for_plan(
+    plan: QueryPlan,
+    selected_tables: list[Any],
+    pool: list[Any],
+    columns_by_table: dict[str, set[str]],
+) -> tuple[list[Any], dict[str, set[str]]]:
+    """Tables + column map needed to validate SQL for a query plan."""
+    from types import SimpleNamespace
+
+    from join_resolver import resolve_dimension_join
+
+    planner_tables = list(selected_tables)
+    cols = dict(columns_by_table or {})
+    pool_fqs = {getattr(t, "full_table_id", "") for t in pool}
+
+    def _ensure_model(model_id: str) -> None:
+        sem = semantic_by_model_id(model_id)
+        if not sem or not sem.full_table_id:
+            return
+        fq = sem.full_table_id
+        cols.setdefault(fq, {d.id for d in sem.dimensions})
+        if any(getattr(t, "full_table_id", "") == fq for t in planner_tables):
+            return
+        if fq in pool_fqs:
+            planner_tables.append(next(t for t in pool if t.full_table_id == fq))
+        else:
+            planner_tables.append(
+                SimpleNamespace(
+                    full_table_id=fq,
+                    column_hints_json="{}",
+                    column_descriptions_json="{}",
+                    ai_profile_json="{}",
+                )
+            )
+
+    _ensure_model(plan.model_id)
+    sem = semantic_by_model_id(plan.model_id)
+    if sem:
+        for dim in plan.group_by or plan.dimensions:
+            joined = resolve_dimension_join(sem, dim)
+            if joined:
+                _ensure_model(joined[0].model_id)
+
+    for mid in list(getattr(plan, "union_member_ids", None) or []):
+        _ensure_model(mid)
+
+    return planner_tables, cols
+
+
+def _measure_for_plan(plan: QueryPlan, semantic: TableSemantic) -> MeasureDef | None:
+    if not plan.measure_id:
+        return None
+    for m in semantic.measures:
+        if m.id == plan.measure_id:
+            return m
+    return None
+
+
+def _table_for_model(model_id: str, tables: list[Any]) -> Any | None:
+    for t in tables:
+        sem = semantic_for_table(t)
+        if sem and sem.model_id == model_id:
+            return t
+    sem = semantic_by_model_id(model_id)
+    if sem and sem.full_table_id:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(full_table_id=sem.full_table_id)
+    return None
+
+
+def _plan_to_measure_plan(plan: QueryPlan, semantic: TableSemantic) -> MeasurePlan | None:
+    measure = _measure_for_plan(plan, semantic)
+    if not measure:
+        return None
+    return MeasurePlan(
+        table_fq=semantic.full_table_id,
+        table_short=semantic.short_name,
+        measure=measure,
+        group_by=list(plan.group_by or plan.dimensions),
+        filters=list(plan.filters),
+        reason=plan.reason,
+    )
+
+
+def compose_scalar_from_plan(
+    plan: QueryPlan,
+    question: str,
+    tables: list[Any],
+) -> str | None:
+    """Aggregate SQL directly from resolved QueryPlan (no measure-router rescan)."""
+    sem = semantic_by_model_id(plan.model_id)
+    if not sem or not sem.full_table_id:
+        return None
+    mp = _plan_to_measure_plan(plan, sem)
+    if not mp:
+        return compose_aggregate(plan, question, tables, tables)
+    table_obj = _table_for_model(plan.model_id, tables)
+    if not table_obj:
+        return None
+    return compose_sql(mp, question, table_obj)
+
+
+def compose_breakdown_from_plan(
+    plan: QueryPlan,
+    question: str,
+    tables: list[Any],
+    *,
+    catalog_tables: list[Any] | None = None,
+) -> str | None:
+    """Breakdown SQL — local dimension or join via workspace model relations."""
+    from join_resolver import resolve_dimension_join
+
+    sem = semantic_by_model_id(plan.model_id)
+    if not sem or not sem.full_table_id:
+        return None
+    mp = _plan_to_measure_plan(plan, sem)
+    if not mp:
+        pool = list(catalog_tables or tables)
+        return compose_aggregate(plan, question, tables, pool)
+
+    group_by = plan.group_by or plan.dimensions
+    if not group_by:
+        return compose_scalar_from_plan(plan, question, tables)
+
+    dim_id = group_by[0]
+    table_obj = _table_for_model(plan.model_id, tables)
+    if not table_obj:
+        return None
+
+    if sem.has_dimension(dim_id):
+        mp.group_by = group_by
+        return compose_sql(mp, question, table_obj)
+
+    joined = resolve_dimension_join(sem, dim_id)
+    if joined:
+        target_sem, rel = joined
+        return compose_breakdown_with_join(
+            mp, question, sem, target_sem, rel, dim_id
+        )
+
+    return compose_aggregate(plan, question, tables, catalog_tables)
+
+
 def compose_aggregate(
     plan: QueryPlan,
     question: str,
@@ -321,6 +465,13 @@ def compose_query_plan(
     if plan.intent == "compound":
         return compose_compound(plan, question, catalog_tables or tables)
 
+    pool = list(catalog_tables or tables)
+    from join_compose import try_compose_join_sql
+
+    join_sql = try_compose_join_sql(question, pool)
+    if join_sql:
+        return join_sql
+
     semantic = semantic_by_model_id(plan.model_id)
     if not semantic:
         return None
@@ -334,6 +485,10 @@ def compose_query_plan(
         return compose_survey_distribution(plan, question, tables, columns_by_table)
 
     if plan.intent in ("aggregate", "breakdown"):
-        return compose_aggregate(plan, question, tables, catalog_tables)
+        if plan.intent == "breakdown":
+            return compose_breakdown_from_plan(
+                plan, question, tables, catalog_tables=catalog_tables
+            )
+        return compose_scalar_from_plan(plan, question, tables)
 
     return None

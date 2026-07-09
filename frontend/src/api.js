@@ -130,6 +130,7 @@ export const api = {
       clarificationChoice,
       clarificationText,
       refinedQuestion,
+      pinnedTableIds = [],
     } = opts;
     const res = await fetch(`${BASE}/threads/${threadId}/ask/stream`, {
       method: "POST",
@@ -140,6 +141,7 @@ export const api = {
         clarification_choice: clarificationChoice || null,
         clarification_text: clarificationText || null,
         refined_question: refinedQuestion || null,
+        pinned_table_ids: pinnedTableIds,
       }),
     });
     if (handleUnauthorized(res)) {
@@ -268,7 +270,7 @@ export const api = {
     req(`/projects/${id}/memory${threadId ? `?thread_id=${threadId}` : ""}`, { method: "DELETE" }),
   ask: (id, question) =>
     req(`/projects/${id}/ask`, { method: "POST", body: { question } }),
-  askStream: async (id, question, onEvent, { forceFresh = false, clarificationChoice, clarificationText, refinedQuestion, threadId = null } = {}) => {
+  askStream: async (id, question, onEvent, { forceFresh = false, clarificationChoice, clarificationText, refinedQuestion, threadId = null, pinnedTableIds = [] } = {}) => {
     const res = await fetch(`${BASE}/projects/${id}/ask/stream`, {
       method: "POST",
       headers: headers(true),
@@ -279,6 +281,7 @@ export const api = {
         clarification_choice: clarificationChoice || null,
         clarification_text: clarificationText || null,
         refined_question: refinedQuestion || null,
+        pinned_table_ids: pinnedTableIds,
       }),
     });
     if (handleUnauthorized(res)) {
