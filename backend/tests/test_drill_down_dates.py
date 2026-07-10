@@ -96,6 +96,20 @@ class DrillDownFollowupTests(unittest.TestCase):
         self.assertIn("attendance_status", out)
         self.assertIn("slot_date", out)
         self.assertNotIn("COUNT", out.upper())
+        self.assertIn("LIMIT 500 OFFSET 0", out)
+
+    def test_paginate_existing_list_sql(self):
+        list_sql = (
+            "SELECT DISTINCT `user_id`\n"
+            "FROM `proj.ds.t`\n"
+            "WHERE DATE(`submitted_date`) BETWEEN DATE '2026-07-01' AND DATE '2026-07-10'\n"
+            "ORDER BY `user_id`\n"
+            "LIMIT 500 OFFSET 0"
+        )
+        page2 = rewrite_aggregate_to_user_list_sql(list_sql, page=2, page_size=500)
+        self.assertIsNotNone(page2)
+        self.assertIn("LIMIT 500 OFFSET 500", page2)
+        self.assertIn("submitted_date", page2)
 
 
 if __name__ == "__main__":

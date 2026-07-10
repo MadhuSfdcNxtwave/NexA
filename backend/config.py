@@ -193,9 +193,9 @@ CACHE_ROUTER_MODE = os.environ.get(
     "rules" if HEX_STYLE_PIPELINE else "llm",
 ).strip().lower()
 
-# Domain SQL templates (NPS/feedback/overview) — off by default: the generic
-# LLM pipeline handles any table. Enable only for curated small workspaces.
-SQL_TEMPLATES_ENABLED = os.environ.get("SQL_TEMPLATES_ENABLED", "false").strip().lower() in (
+# Domain SQL templates (NPS/feedback/overview). NPS templates always run in code;
+# this flag gates the other domain templates. Default on for curated workspaces.
+SQL_TEMPLATES_ENABLED = os.environ.get("SQL_TEMPLATES_ENABLED", "true").strip().lower() in (
     "1",
     "true",
     "yes",
@@ -243,6 +243,9 @@ CACHE_ANSWER_ENABLED = os.environ.get("CACHE_ANSWER_ENABLED", "true").strip().lo
 )
 MEMORY_MAX_ROWS = int(os.environ.get("MEMORY_MAX_ROWS", "500"))
 NOTEBOOK_MAX_ROWS = int(os.environ.get("NOTEBOOK_MAX_ROWS", "2000"))
+# Drill-down user-id lists: page size for LIMIT/OFFSET pagination.
+DRILL_DOWN_PAGE_SIZE = int(os.environ.get("DRILL_DOWN_PAGE_SIZE", "500"))
+DRILL_DOWN_MAX_PAGE_SIZE = int(os.environ.get("DRILL_DOWN_MAX_PAGE_SIZE", "2000"))
 
 # Schema explorer agent: per-table context cache TTL (sample values, date ranges).
 SCHEMA_CACHE_TTL_HOURS = float(os.environ.get("SCHEMA_CACHE_TTL_HOURS", "6"))
@@ -253,6 +256,12 @@ PATTERN_MINER_REFRESH_MINUTES = float(os.environ.get("PATTERN_MINER_REFRESH_MINU
 PATTERN_MINER_MIN_OCCURRENCES = int(os.environ.get("PATTERN_MINER_MIN_OCCURRENCES", "3"))
 TEMPLATE_PROMOTER_THRESHOLD = int(os.environ.get("TEMPLATE_PROMOTER_THRESHOLD", "3"))
 AGENTS_PIPELINE_ENABLED = os.environ.get("AGENTS_PIPELINE_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Staged table selection: keyword shortlist → description confirm → columns → Business rules.
+SELECTION_AGENT_ENABLED = os.environ.get("SELECTION_AGENT_ENABLED", "true").strip().lower() in (
     "1",
     "true",
     "yes",

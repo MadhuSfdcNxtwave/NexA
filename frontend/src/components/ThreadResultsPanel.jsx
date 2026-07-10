@@ -36,8 +36,15 @@ function ResultsSkeleton() {
 }
 
 function defaultTab(turn) {
+  const cols = (turn.columns || []).map((c) => String(c).toLowerCase());
+  const isIdList =
+    (cols.length === 1 && ["user_id", "uid", "userid"].includes(cols[0])) ||
+    (cols.includes("user_id") &&
+      cols.some((c) => ["user_name", "first_name", "last_name", "full_name", "name"].includes(c)));
+  const preferTable = turn.chart_spec?.prefer_table || isIdList;
   const hasChart = turn.chart_spec?.chart && turn.chart_spec.chart !== "none";
   const hasTable = turn.rows?.length > 0 && turn.columns?.length > 0;
+  if (preferTable && hasTable) return "table";
   if (hasChart) return "chart";
   if (hasTable) return "table";
   return "sql";
@@ -54,6 +61,8 @@ function TurnResultCard({
   pinDisabled,
   onRerunSql,
   rerunDisabled,
+  onFollowUp,
+  followUpDisabled,
   cardRef,
 }) {
   const [activeTab, setActiveTab] = useState(null);
@@ -75,7 +84,8 @@ function TurnResultCard({
   const hasChart = turn.chart_spec?.chart && turn.chart_spec.chart !== "none";
   const hasTable = turn.rows?.length > 0 && turn.columns?.length > 0;
   const showSqlEditor = editSql || tab === "sql";
-  const showProgress = loading && isActive && askProgress;
+  // Only show progress on a dedicated pending card — never overlay a finished prior turn.
+  const showProgress = Boolean(loading && isActive && askProgress && turn?.pending);
 
   const openSqlEdit = () => {
     setSqlDraft(turn.sql || "");
@@ -86,8 +96,9 @@ function TurnResultCard({
   return (
     <article
       ref={cardRef}
-      className={`analysis-turn-block ${isActive ? "active" : ""}`}
+      className={`analysis-turn-block ${isActive ? "active" : ""}${turn.pending ? " pending" : ""}${isActive ? " flash-sync" : ""}`}
       onClick={() => onSelect?.(turnIndex)}
+      data-turn-index={turnIndex}
     >
       <header className="results-header">
         <span className="results-header-label">Turn {turnIndex + 1}</span>
@@ -99,22 +110,30 @@ function TurnResultCard({
               : `${Math.floor(turn.worked_seconds / 60)} min ${Math.round(turn.worked_seconds % 60)} sec`}
           </p>
         )}
-        <UsageMeta
-          bytes_estimate={turn.bytes_estimate}
-          credits_used={turn.credits_used}
-          credits_remaining={turn.credits_remaining}
-          from_cache={turn.from_cache}
-        />
+        {!turn.pending && (
+          <UsageMeta
+            bytes_estimate={turn.bytes_estimate}
+            credits_used={turn.credits_used}
+            credits_remaining={turn.credits_remaining}
+            from_cache={turn.from_cache}
+          />
+        )}
       </header>
 
       {routingLine && <p className="results-routing muted">{routingLine}</p>}
 
-      <InsightCard
-        analysis={turn.analysis}
-        sqlSource={turn.sql_source}
-        modelUsed={turn.model_used}
-        suggestions={turn.suggestions}
-      />
+      {turn.selected_tables?.length > 0 && (
+        <div className="ask-selected-tables results-selected-tables">
+          <span className="ask-selected-tables-label">Using table{turn.selected_tables.length === 1 ? "" : "s"}</span>
+          <div className="ask-selected-table-chips">
+            {turn.selected_tables.map((name) => (
+              <code key={name} className="ask-selected-table-chip" title={name}>
+                {name}
+              </code>
+            ))}
+          </div>
+        </div>
+      )}
 
       {showProgress && (
         <div className="results-loading-overlay">
@@ -122,6 +141,18 @@ function TurnResultCard({
         </div>
       )}
 
+      {!turn.pending && (
+        <InsightCard
+          analysis={turn.analysis}
+          sqlSource={turn.sql_source}
+          modelUsed={turn.model_used}
+          suggestions={turn.suggestions}
+          onFollowUp={onFollowUp}
+          disabled={followUpDisabled}
+        />
+      )}
+
+      {!turn.pending && (
       <div className="results-tabs" role="tablist" aria-label="Result views">
         {hasChart && (
           <button
@@ -157,8 +188,9 @@ function TurnResultCard({
           </button>
         )}
       </div>
+      )}
 
-      {tab === "chart" && hasChart && (
+      {!turn.pending && tab === "chart" && hasChart && (
         <section className="results-section glass-card">
           <SmartChart
             columns={turn.columns}
@@ -169,13 +201,13 @@ function TurnResultCard({
         </section>
       )}
 
-      {tab === "table" && hasTable && (
-        <section className="results-section glass-card">
-          <VizTable rows={turn.rows} columns={turn.columns} limit={100} />
+      {!turn.pending && tab === "table" && hasTable && (
+        <section className="results-section glass-card" onClick={(e) => e.stopPropagation()}>
+          <VizTable rows={turn.rows} columns={turn.columns} limit={100} pageSize={50} />
         </section>
       )}
 
-      {tab === "sql" && turn.sql && (
+      {!turn.pending && tab === "sql" && turn.sql && (
         <section className="results-section glass-card">
           {showSqlEditor && onRerunSql ? (
             <>
@@ -226,7 +258,7 @@ function TurnResultCard({
         </section>
       )}
 
-      {turn.sql && onPin && (
+      {!turn.pending && turn.sql && onPin && (
         <button
           type="button"
           className="primary results-pin-btn"
@@ -248,27 +280,37 @@ export default function ThreadResultsPanel({
   turn,
   loading,
   askProgress,
+  pendingQuestion = "",
   threadOverview = "",
   onPin,
   pinDisabled,
   onRerunSql,
   rerunDisabled,
+  onFollowUp,
+  followUpDisabled,
 }) {
   const feedRef = useRef(null);
   const turnRefs = useRef([]);
   const list = turns?.length ? turns : turn ? [turn] : [];
-  const activeIdx = turns?.length
-    ? (activeTurnIdx >= 0 && activeTurnIdx < turns.length ? activeTurnIdx : turns.length - 1)
-    : 0;
+  const pending = (pendingQuestion || "").trim();
+  const showPending = Boolean(loading && pending);
+  const displayList = showPending
+    ? [...list, { question: pending, pending: true, analysis: "", rows: [], columns: [] }]
+    : list;
+  const activeIdx = showPending
+    ? displayList.length - 1
+    : turns?.length
+      ? (activeTurnIdx >= 0 && activeTurnIdx < turns.length ? activeTurnIdx : turns.length - 1)
+      : 0;
 
   useEffect(() => {
     const el = turnRefs.current[activeIdx];
     if (el?.scrollIntoView) {
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, [activeIdx, list.length, loading]);
+  }, [activeIdx, displayList.length, loading, pending]);
 
-  if (loading && !list.length) {
+  if (loading && !list.length && !pending) {
     return (
       <div className="results-panel-inner">
         {askProgress ? <AskProgress progress={askProgress} active /> : <ResultsSkeleton />}
@@ -276,7 +318,7 @@ export default function ThreadResultsPanel({
     );
   }
 
-  if (!list.length) {
+  if (!displayList.length) {
     return (
       <div className="results-panel-inner">
         <ResultsEmpty />
@@ -292,19 +334,21 @@ export default function ThreadResultsPanel({
           <pre className="thread-overview-body">{threadOverview}</pre>
         </details>
       )}
-      {list.map((t, i) => (
+      {displayList.map((t, i) => (
         <TurnResultCard
-          key={`${i}-${t.question?.slice(0, 32)}`}
+          key={t.pending ? `pending-${t.question?.slice(0, 32)}` : `${i}-${t.question?.slice(0, 32)}`}
           turn={t}
           turnIndex={i}
           isActive={i === activeIdx}
-          onSelect={onSelectTurn}
-          loading={loading}
-          askProgress={i === activeIdx ? askProgress : null}
+          onSelect={t.pending ? undefined : onSelectTurn}
+          loading={loading && t.pending}
+          askProgress={t.pending ? askProgress : null}
           onPin={onPin}
           pinDisabled={pinDisabled}
           onRerunSql={onRerunSql}
           rerunDisabled={rerunDisabled}
+          onFollowUp={onFollowUp}
+          followUpDisabled={followUpDisabled}
           cardRef={(el) => { turnRefs.current[i] = el; }}
         />
       ))}

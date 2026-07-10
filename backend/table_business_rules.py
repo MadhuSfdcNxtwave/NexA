@@ -1,4 +1,8 @@
-"""Per-table business rules stored on WorkspaceTable.business_rules."""
+"""Per-table business rules stored on WorkspaceTable.business_rules.
+
+Flow: after Ask selects table(s) → load each table's rules → inject as
+mandatory SQL guidance (overrides default measures/filters when they conflict).
+"""
 from __future__ import annotations
 
 import re
@@ -43,20 +47,76 @@ def table_skips_default_filters(table: Any) -> bool:
 
 def format_table_rules_block(tables: list[Any]) -> str:
     """Prompt block: per-table rules that MUST override YAML defaults."""
+    return build_mandatory_rules_preamble(tables, include_header=False)
+
+
+def build_mandatory_rules_preamble(
+    tables: list[Any],
+    *,
+    include_header: bool = True,
+) -> str:
+    """Build the post-selection rules block for SQL generation.
+
+    Called after tables are chosen. Rules tell the model grain, filters,
+    count semantics (COUNT(*) vs COUNT DISTINCT), and metric definitions.
+    """
     lines: list[str] = []
+    if include_header:
+        lines.extend(
+            [
+                "# ============================================================",
+                "# MANDATORY — SELECTED TABLE BUSINESS RULES",
+                "# Tables are already chosen. Read these rules BEFORE writing SQL.",
+                "# Rules override default measures, glossary filters, and habits.",
+                "# If a rule conflicts with anything else in this prompt, FOLLOW THE RULE.",
+                "# ============================================================",
+            ]
+        )
+
+    any_rules = False
     for t in tables or []:
         rules = get_table_business_rules(t)
-        if not rules:
-            continue
         short = getattr(t, "full_table_id", "").rsplit(".", 1)[-1] or "table"
-        lines.append(f"# TABLE BUSINESS RULES for `{short}` (MUST FOLLOW — override default filters):")
+        fq = getattr(t, "full_table_id", "") or short
+        if not rules:
+            if include_header:
+                lines.append(f"# `{short}` — no custom business_rules; use description + measures carefully.")
+            continue
+        any_rules = True
+        lines.append(f"# --- RULES for `{short}` (`{fq}`) ---")
         for ln in rules.splitlines():
             ln = ln.strip()
             if ln:
-                lines.append(f"#   {ln[:300]}")
+                lines.append(f"#   {ln[:400]}")
         if rules_skip_default_filters(rules):
             lines.append(
-                f"#   → Do NOT add pause_status / onboarding-access / other default WHERE filters "
-                f"for `{short}`."
+                f"#   → Do NOT add pause_status / onboarding-access / other default WHERE "
+                f"filters for `{short}` unless the question explicitly asks for them."
             )
-    return "\n".join(lines)
+
+    if include_header and any_rules:
+        lines.append(
+            "# Apply the matching table's rules to the user question "
+            "(grain, COUNT vs COUNT DISTINCT, rating bands, date columns, etc.)."
+        )
+    elif include_header and not any_rules and not any(
+        get_table_business_rules(t) for t in (tables or [])
+    ):
+        # header-only with "no custom" lines already added
+        pass
+
+    return "\n".join(lines).strip()
+
+
+def prepend_rules_to_schema(schema_text: str, tables: list[Any]) -> str:
+    """Put mandatory rules at the top so truncation cannot drop them."""
+    preamble = build_mandatory_rules_preamble(tables)
+    body = (schema_text or "").strip()
+    if not preamble:
+        return body
+    if not body:
+        return preamble
+    # Avoid duplicating if already prepended
+    if "MANDATORY — SELECTED TABLE BUSINESS RULES" in body[:800]:
+        return body
+    return f"{preamble}\n\n{body}"

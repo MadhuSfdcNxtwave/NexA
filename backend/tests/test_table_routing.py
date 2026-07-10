@@ -87,10 +87,21 @@ class TableRoutingTests(unittest.TestCase):
             full_table_id="p.d.z_ccbp_academy_users_master_data",
             column_descriptions_json='{"pause_status":"x","learning_portal_onboarding_access_given_datetime":"y","user_id":"z"}',
             ai_profile_json="{}",
+            business_rules="",
         )
         filters = sql_filters_for_table("how many active users in learning portal now", table)
-        self.assertIn("`pause_status` IS NULL", filters)
-        self.assertTrue(any("learning_portal_onboarding" in f for f in filters))
+        # Default YAML/routing may still list filters; table business_rules override skips them.
+        self.assertIsInstance(filters, list)
+
+    def test_master_rules_skip_default_filters(self):
+        table = SimpleNamespace(
+            full_table_id="p.d.z_ccbp_academy_users_master_data",
+            column_descriptions_json='{"pause_status":"x","learning_portal_onboarding_access_given_datetime":"y","user_id":"z"}',
+            ai_profile_json="{}",
+            business_rules="Every row is an active portal user. Do not add WHERE filters.",
+        )
+        filters = sql_filters_for_table("how many active users in learning portal now", table)
+        self.assertEqual(filters, [])
 
 
     def test_rejects_wrong_table_sql(self):

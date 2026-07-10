@@ -7,7 +7,7 @@ import Chart from "./Chart.jsx";
 import AskProgress from "./AskProgress.jsx";
 import SendButton from "./SendButton.jsx";
 import ClarificationPanel from "./ClarificationDialog.jsx";
-import { IconPlus } from "./Icons.jsx";
+import { IconPlus, IconStop } from "./Icons.jsx";
 import {
   startAskJob,
   updateAskJobProgress,
@@ -17,9 +17,12 @@ import {
   getAskJob,
   matchesAskJob,
   subscribeAskJob,
+  stopAskJob,
+  getAskAbortSignal,
 } from "../askStore.js";
 import SqlNotebookCells from "./SqlNotebookCells.jsx";
 import { extractPinnedTableIds } from "../tableMentions.js";
+import { normalizeAskResult } from "../askResult.js";
 
 function FollowUpSuggestions({ suggestions, onPick, disabled }) {
   if (!suggestions?.length) return null;
@@ -78,11 +81,13 @@ export default function ThreadAgentPanel({
         next.status = event.message || next.status;
         next.keywords = event.keywords || [];
         next.tables = event.tables || [];
+        if (event.routing_reason) next.routingReason = event.routing_reason;
         next.phase = "plan";
       }
       if (event.type === "reasoning") next.reasoning = event.text;
       if (event.type === "view_tables") {
         next.viewedTables = event.tables || [];
+        if (event.routing_reason) next.routingReason = event.routing_reason;
         next.phase = "plan";
       }
       if (event.type === "match_columns") {
@@ -168,6 +173,7 @@ export default function ThreadAgentPanel({
     setError("");
     setPendingQ(text);
     startAskJob({ projectId: pid, threadId: threadIdRef.current, question: text });
+    const signal = getAskAbortSignal();
     setAskProgress({ status: "Starting…", keywords: [], tables: [], viewedTables: [], phase: "plan" });
     let approvalPayload = null;
     let clarPayload = null;
@@ -195,6 +201,7 @@ export default function ThreadAgentPanel({
         clarificationText: clarOpts?.clarificationText,
         refinedQuestion: clarOpts?.refinedQuestion,
         pinnedTableIds: extractPinnedTableIds(text, workspaceTables),
+        signal,
       });
       if (activeIdRef.current !== pid) return;
       if (clarPayload) {
@@ -210,7 +217,7 @@ export default function ThreadAgentPanel({
           approvalPayload.question,
           approvalPayload.sql,
           applyProgressEvent,
-          { threadId: threadIdRef.current },
+          { threadId: threadIdRef.current, signal },
         );
       }
       if (res) {
@@ -222,9 +229,14 @@ export default function ThreadAgentPanel({
       }
     } catch (e) {
       if (activeIdRef.current === pid) {
-        setError(e.message);
-        setPendingQ("");
-        setAskJobError(e.message);
+        if (e?.stopped || e?.name === "AbortError" || e?.message === "Stopped") {
+          setError("");
+          setPendingQ("");
+        } else {
+          setError(e.message);
+          setPendingQ("");
+          setAskJobError(e.message);
+        }
       }
     } finally {
       if (activeIdRef.current === pid && !clarPayload) {
@@ -233,6 +245,14 @@ export default function ThreadAgentPanel({
         finishAskJob();
       }
     }
+  };
+
+  const stopAsk = () => {
+    stopAskJob();
+    setLoading(false);
+    setAskProgress(null);
+    setPendingQ("");
+    setError("");
   };
 
   const handleClarification = async (choiceId, choiceText, refinedQuestion) => {
@@ -419,15 +439,33 @@ export default function ThreadAgentPanel({
         )}
         <div className="notebook-agent-composer-foot">
           <button type="button" className="pill-btn" title="Add"><IconPlus /></button>
-          <label className="toggle-label fresh-query-toggle" title="Skip cache">
+          <label
+            className="toggle-label fresh-query-toggle"
+            title="Re-run on BigQuery and skip cached answers. Thread memory is still used for follow-ups."
+          >
             <input
               type="checkbox"
               checked={forceFresh}
               onChange={(e) => setForceFresh(e.target.checked)}
             />
-            Fresh
+            <span className="fresh-toggle-text">
+              Re-run BQ
+              <span className="fresh-toggle-hint">keeps memory</span>
+            </span>
           </label>
-          <SendButton compact onClick={ask} disabled={loading || !q.trim()} />
+          {loading ? (
+            <button
+              type="button"
+              className="send-btn send-btn-compact stop-btn"
+              onClick={stopAsk}
+              title="Stop"
+              aria-label="Stop"
+            >
+              <IconStop />
+            </button>
+          ) : (
+            <SendButton compact onClick={ask} disabled={!q.trim()} />
+          )}
         </div>
       </div>
     </aside>

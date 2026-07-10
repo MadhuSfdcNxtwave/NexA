@@ -300,7 +300,10 @@ SQL_SYSTEM = (
     "Add LIMIT 200 for row-level detail lists.\n"
     "\n"
     "## Correctness rules (violations cause hard failures)\n"
-    "- Read the # Knowledge base and AI OVERVIEW sections first — they contain REAL data "
+    "- FIRST read # MANDATORY — SELECTED TABLE BUSINESS RULES (if present). Those rules "
+    "define grain, COUNT(*) vs COUNT(DISTINCT), rating bands, date columns, and filters "
+    "for the already-selected table(s). Follow them exactly — they override defaults.\n"
+    "- Read the # Knowledge base and AI OVERVIEW sections — they contain REAL data "
     "coverage (date ranges), join keys, and ready-made topic-search expressions. Trust them.\n"
     "- When the question gives a month/period WITHOUT a year, use the MOST RECENT matching "
     "period inside the table's data coverage (e.g. «June» with coverage Jan–Jun 2026 means "
@@ -353,12 +356,16 @@ SQL_SYSTEM = (
     "status values (e.g. hired/placed status columns) — use the EXACT values shown there.\n"
     "\n"
     "## Filters — do NOT invent them\n"
+    "- TABLE BUSINESS RULES win over every other filter habit.\n"
     "- If TABLE BUSINESS RULES say not to add WHERE filters (or that every row is already "
     "active), follow those rules and do NOT add pause_status / onboarding filters.\n"
+    "- If rules define promoter/detractor/passive bands or NPS formulas, use those exact bands.\n"
+    "- If rules say COUNT(*) for responses vs COUNT(DISTINCT user_id) for users, follow that.\n"
     "- Otherwise: add pause_status IS NULL ONLY when the question explicitly says active, live, "
     "not paused, or current students. If the question just says students/users/count, "
     "do NOT filter by pause_status.\n"
-    "- Add date/month filters ONLY when the question mentions a time period.\n"
+    "- Add date/month filters ONLY when the question mentions a time period "
+    "(use the date column named in the table rules when provided).\n"
     "- Do not copy example filters from AI overview unless the question asks for them.\n"
     "\n"
     "Output ONLY SQL — no prose, no markdown fences."
@@ -836,9 +843,26 @@ def build_presentation(
 ) -> tuple[list[dict], dict, str]:
     """Chart spec + dashboard prep + business-friendly analysis."""
     from chart_prepare import prepare_chart
-    from presentation import infer_chart_spec, merge_chart_specs
+    from presentation import (
+        analyze_user_id_list,
+        infer_chart_spec,
+        is_user_id_list_result,
+        merge_chart_specs,
+    )
 
     sample = sample if sample is not None else rows[:50]
+
+    # Drill-down id lists: deterministic write-up (avoid count-style LLM fluff).
+    if is_user_id_list_result(columns, rows, sql=sql, question=question):
+        chart_spec = {
+            "chart": "none",
+            "title": f"{len(rows):,} user ids",
+            "prefer_table": True,
+        }
+        viz_rows, chart_spec = prepare_chart(rows, columns, chart_spec, question)
+        analysis = analyze_user_id_list(question, columns, rows, sql=sql)
+        return viz_rows, chart_spec, analysis
+
     fallback_spec = infer_chart_spec(question, columns, rows)
     if config.PRESENTATION_MODE == "hex":
         chart_spec = merge_chart_specs({}, fallback_spec)

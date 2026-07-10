@@ -221,9 +221,12 @@ def active_portal_sql_shape_ok(sql: str, *, question: str = "") -> bool:
         return False
     if re.search(r"\blp_status\b|\blp status\b", q):
         return "lp_status" in sql_l and "active" in sql_l
-    # Canonical: master data — not paused + portal access granted
-    if "master_data" in sql_l or "pause_status" in sql_l:
-        return "pause_status" in sql_l and "is null" in sql_l
+    # Canonical: master data — every row is an active portal user (no required WHERE)
+    if "master_data" in sql_l:
+        return bool(re.search(r"count\s*\(\s*distinct", sql_l)) and "user_id" in sql_l
+    # Legacy shape still accepted
+    if "pause_status" in sql_l and "is null" in sql_l:
+        return True
     if "day_and_page_wise" in sql_l and "lp_status" in sql_l:
         return "active" in sql_l
     return False

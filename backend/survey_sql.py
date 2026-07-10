@@ -34,15 +34,30 @@ def is_survey_answer_question(question: str) -> bool:
 
 
 def _pick_feedback_table(tables: list, columns_by_table: dict[str, set[str]]) -> tuple[str, set[str]] | None:
+    """Prefer contextual feedback over live-class / NPS when multiple match."""
+    candidates: list[tuple[int, str, set[str]]] = []
     for t in tables:
         fq = t.full_table_id
         short = fq.rsplit(".", 1)[-1].lower()
         if not _FEEDBACK_TABLE.search(short):
             continue
         cols = columns_by_table.get(fq) or set()
-        if "question_text" in cols and "user_answer" in cols:
-            return fq, cols
-    return None
+        if "question_text" not in cols or "user_answer" not in cols:
+            continue
+        rank = 0
+        if "contextual_feedback" in short:
+            rank += 100
+        if "live_class" in short:
+            rank -= 50
+        if "nps" in short:
+            rank -= 40
+        if "feedback_trigger" in cols:
+            rank += 20
+        candidates.append((rank, fq, cols))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (-x[0], x[1]))
+    return candidates[0][1], candidates[0][2]
 
 
 def _escape_sql_string(value: str) -> str:

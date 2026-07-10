@@ -147,6 +147,58 @@ def sql_intent_mismatch_reason(
         if re.search(r"\bmonth", q, re.I) and not re.search(r"\bGROUP BY\b", sql_text, re.I):
             return "monthly NPS scores require GROUP BY month"
 
+    # Promoter / detractor / passive counts must filter the rating band.
+    if re.search(r"\b(promoters?|detractors?|passives?)\b", q, re.I):
+        if re.search(r"unique_responders", sql_text, re.I) and not re.search(
+            r"promoter|detractor|passive|BETWEEN|>=\s*9|<=\s*6", sql_text, re.I
+        ):
+            return "promoter/detractor questions must filter rating_on_scale_of_0_to_10"
+        if re.search(r"\bpromoter", q, re.I) and not re.search(
+            r">=\s*9|BETWEEN\s*9\s*AND\s*10|promoter", sql_text, re.I
+        ):
+            return "promoter count requires rating 9–10 filter"
+        if re.search(r"\bdetractor", q, re.I) and not re.search(
+            r"<=\s*6|BETWEEN\s*0\s*AND\s*6|detractor", sql_text, re.I
+        ):
+            return "detractor count requires rating 0–6 filter"
+
+    # "this year" / explicit year / period questions must include a date filter in SQL.
+    if re.search(
+        r"\b(this year|current year|ytd|this month|last month|yesterday|20\d{2})\b",
+        q,
+        re.I,
+    ):
+        if re.search(r"\b(placed|placement|got\s+jobs?|promoter|nps|attend)\b", q, re.I):
+            if not re.search(
+                r"date_of_placement|form_submission|slot_date|calendar_date|"
+                r"BETWEEN\s+DATE|EXTRACT\s*\(\s*YEAR|DATE\s*\(",
+                sql_text,
+                re.I,
+            ):
+                return "period question requires a date filter in SQL"
+
+    # Raw / CSV / field-wise must not collapse to aggregates.
+    try:
+        from agents.answer_shape import wants_raw_tabular_data
+
+        if wants_raw_tabular_data(q):
+            if re.search(
+                r"SELECT\s+COUNT\s*\(|COUNT\s*\(\s*DISTINCT|unique_responders|response_count",
+                sql_text,
+                re.I,
+            ) and not re.search(r"\bGROUP BY\b.{0,80}\buser_answer\b", sql_text, re.I | re.S):
+                # Scalar or user-count aggregate is wrong for raw export.
+                if re.search(
+                    r"COUNT\s*\(\s*DISTINCT\s+[`\"]?user_id|SELECT\s+COUNT\s*\(\s*\*\s*\)",
+                    sql_text,
+                    re.I,
+                ):
+                    return "raw/CSV/field-wise request must return row-level columns, not aggregates"
+            if re.search(r"SELECT\s+COUNT\s*\(\s*DISTINCT\s+[`\"]?user_id", sql_text, re.I):
+                return "raw/CSV/field-wise request must return row-level columns, not aggregates"
+    except Exception:
+        pass
+
     return None
 
 

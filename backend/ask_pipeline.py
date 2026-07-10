@@ -197,10 +197,27 @@ def _attach_suggestions(
 ) -> dict[str, Any]:
     if result.get("suggestions"):
         return result
+    from presentation import is_user_id_list_result, suggest_id_list_followups
+
+    cols = result.get("columns") or []
+    rows = result.get("rows") or []
+    sql = result.get("sql") or ""
+    q = result.get("question") or ""
+    if (
+        result.get("sql_source") == "drill_down"
+        or is_user_id_list_result(cols, rows, sql=sql, question=q)
+    ):
+        result["suggestions"] = suggest_id_list_followups(
+            q,
+            sql=sql,
+            columns=cols,
+            selected_tables=result.get("selected_tables") or [],
+        )
+        return result
     result["suggestions"] = llm.suggest_followups(
-        result.get("question") or "",
+        q,
         analysis=result.get("analysis") or "",
-        columns=result.get("columns") or None,
+        columns=cols or None,
         schema_excerpt=schema_text,
         error_context=error_context,
     )
@@ -289,6 +306,46 @@ def _is_feedback_question(question: str) -> bool:
     return is_feedback_table_question(q)
 
 
+def _try_placement_template_sql(
+    question: str,
+    selected_tables: list,
+    hints_map: dict,
+    inferred: dict,
+    columns_by_table: dict[str, set[str]],
+    *,
+    included_tables: list | None = None,
+    schema_entities: list | None = None,
+) -> str | None:
+    """Always-on placement count template (date filters for this year / periods)."""
+    from memory_lookup import sql_matches_question_intent
+    from placement_sql import try_build_placement_sql
+
+    pool = list(selected_tables)
+    if included_tables:
+        seen = {t.full_table_id for t in pool}
+        for t in included_tables:
+            if t.full_table_id not in seen:
+                pool.append(t)
+                seen.add(t.full_table_id)
+    raw = try_build_placement_sql(question, pool, columns_by_table)
+    if not raw:
+        return None
+    try:
+        sql = bq.validate_select_only(raw)
+    except ValueError:
+        return None
+    if not sql_matches_question_intent(
+        question, sql, schema_entities=schema_entities
+    ):
+        return None
+    violations = validate_sql(
+        sql, question, pool, hints_map, inferred, columns_by_table=columns_by_table
+    )
+    if violations:
+        return None
+    return sql
+
+
 def _try_nps_template_sql(
     question: str,
     selected_tables: list,
@@ -299,8 +356,7 @@ def _try_nps_template_sql(
     included_tables: list | None = None,
     schema_entities: list | None = None,
 ) -> str | None:
-    if not config.SQL_TEMPLATES_ENABLED:
-        return None
+    # Always on — NPS promoter/score/month templates must not depend on SQL_TEMPLATES_ENABLED.
     from memory_lookup import sql_matches_question_intent
     from nps_sql import try_build_nps_sql
 
@@ -1082,6 +1138,7 @@ def _plan_event(plan) -> dict:
         "type": "search_tables",
         "message": plan.status_message,
         "keywords": plan.keywords,
+        "routing_reason": getattr(plan, "routing_reason", "") or "",
         "tables": [
             {
                 "full_table_id": m.full_table_id,
@@ -1538,6 +1595,17 @@ def iter_ask(
     if expanded_question != original_question.strip():
         question = expanded_question
 
+    from agents.query_shape import detect_query_shape, query_shape_status_message
+
+    query_shape = detect_query_shape(
+        original_question,
+        prior_sql=prior_sql,
+        prior_question=prior_q,
+    )
+    shape_msg = query_shape_status_message(query_shape)
+    if shape_msg:
+        yield {"type": "status", "message": shape_msg}
+
     query_ctx = build_query_context(
         question,
         original_question=original_question,
@@ -1761,9 +1829,15 @@ def iter_ask(
         routing_reason=plan.routing_reason or plan.reasoning[:200],
         selected=[m.short_name for m in plan.tables if m.selected],
         top_scores=[(m.short_name, m.score) for m in plan.tables[:5]],
+        answer_mode=getattr(plan, "answer_mode", "auto"),
     )
     yield {"type": "status", "message": plan.status_message}
     yield _plan_event(plan)
+
+    # Selection agent asked which feedback table — stop before SQL.
+    if getattr(plan, "clarify", None) and not has_clarification and config.ASK_CLARIFICATION_ENABLED:
+        yield {"type": "awaiting_clarification", **plan.clarify}
+        return
 
     if plan.join_relations:
         yield {
@@ -1794,6 +1868,7 @@ def iter_ask(
     yield {
         "type": "view_tables",
         "count": len(selected),
+        "routing_reason": plan.routing_reason or "",
         "tables": [
             {"full_table_id": t.full_table_id, "short_name": _short(t.full_table_id)}
             for t in selected
@@ -1978,21 +2053,36 @@ def iter_ask(
         from sql_composer import enrich_schema_with_measures
 
         schema_text = enrich_schema_with_measures(schema_text, selected[0])
-    schema_text = _compact_schema_text(schema_text, num_tables=len(selected))
 
     from agents.pipeline_bridge import (
         agents_enabled,
-        business_rules_block,
         critic_validate_and_fix,
         enrich_schema_context,
         sql_model_for_question,
         try_learned_pattern,
     )
+    from business_rules_loader import prompt_block_for_question
+    from table_business_rules import prepend_rules_to_schema
 
     schema_text = enrich_schema_context([t.full_table_id for t in selected], schema_text)
-    rules_block = business_rules_block(question, tables=selected)
-    if rules_block:
-        schema_text += "\n\n" + rules_block
+    yaml_hints = prompt_block_for_question(question, tables=selected)
+    if yaml_hints:
+        schema_text += "\n\n" + yaml_hints
+    # Compact schema body, then put selected-table rules at the TOP (never truncated).
+    schema_text = _compact_schema_text(schema_text, num_tables=len(selected))
+    schema_text = prepend_rules_to_schema(schema_text, selected)
+    # Planner answer-mode + rules checkpoints for SQL generation.
+    if getattr(plan, "rules_block", "") and "MANDATORY" not in (schema_text[:500] or ""):
+        schema_text = (plan.rules_block + "\n\n" + schema_text).strip()
+    if getattr(plan, "answer_mode", "") == "raw":
+        schema_text = (
+            "# ANSWER SHAPE CHECKPOINT: User wants RAW / field-wise / CSV-ready rows.\n"
+            "# Do NOT use COUNT/COUNT DISTINCT aggregates. SELECT row-level columns.\n\n"
+            + schema_text
+        )
+    shape_checkpoint = query_shape.to_schema_checkpoint() if query_shape else ""
+    if shape_checkpoint:
+        schema_text = shape_checkpoint + "\n\n" + schema_text
     model_used = sql_model_for_question(question) if agents_enabled() else config.FETCH_MODEL
 
     routing_meta = _routing_meta(plan=plan, selected=selected)
@@ -2020,16 +2110,121 @@ def iter_ask(
         chain_plan: list[dict[str, str]] = []
         from domain_sql import is_domain_question, resolve_domain_sql
 
-        if not config.HEX_STYLE_PIPELINE:
+        # Thread continuity first: rewrite prior COUNT → SELECT DISTINCT user_id
+        # (paginated LIMIT/OFFSET) before domain/chain/LLM.
+        if prior_sql and not has_clarification:
+            from question_intent import (
+                is_drill_down_data_request,
+                is_list_pagination_request,
+                is_user_id_list_sql,
+                parse_list_page_request,
+                rewrite_aggregate_to_user_list_sql,
+            )
+            from ask_plan import _tables_from_prior_sql
+
+            want_page = is_list_pagination_request(original_question) and (
+                is_user_id_list_sql(prior_sql) or is_drill_down_data_request(original_question)
+            )
+            want_drill = is_drill_down_data_request(original_question) or is_drill_down_data_request(
+                question
+            )
+            if want_page or want_drill:
+                page_info = parse_list_page_request(original_question, prior_sql=prior_sql)
+                page = page_info["page"] if (want_page or is_user_id_list_sql(prior_sql)) else 1
+                if want_drill and not want_page and not is_user_id_list_sql(prior_sql):
+                    page = 1
+                # Include profile/master columns so name JOINs can resolve even when
+                # the Ask plan only selected the fact table.
+                drill_cols = dict(columns_by_table or {})
+                name_pool = []
+                for t in included_tables or []:
+                    short = (t.full_table_id or "").rsplit(".", 1)[-1].lower()
+                    if any(
+                        k in short
+                        for k in (
+                            "profile_basic_details",
+                            "master_data",
+                            "users_master",
+                        )
+                    ):
+                        name_pool.append(t)
+                if name_pool:
+                    _, extra_cols = _infer_hints_for_tables(name_pool)
+                    drill_cols.update(extra_cols)
+                rewritten = rewrite_aggregate_to_user_list_sql(
+                    prior_sql,
+                    page=page,
+                    page_size=page_info["page_size"],
+                    question=original_question,
+                    included_tables=included_tables,
+                    columns_by_table=drill_cols,
+                )
+                drill_table = selected[0] if selected else None
+                if not drill_table:
+                    prior_ids = _tables_from_prior_sql(prior_sql, included_tables or [])
+                    if prior_ids:
+                        drill_table = next(
+                            (t for t in (included_tables or []) if t.full_table_id == prior_ids[0]),
+                            None,
+                        )
+                if rewritten and drill_table:
+                    try:
+                        drill_sql = bq.validate_select_only(rewritten)
+                        from question_intent import question_wants_user_names
+
+                        name_note = (
+                            " + names from profile/master"
+                            if question_wants_user_names(original_question)
+                            else ""
+                        )
+                        domain_resolved = (
+                            drill_sql,
+                            drill_table,
+                            (
+                                f"Drill-down page {page}{name_note} "
+                                f"(LIMIT {page_info['page_size']} OFFSET {(page - 1) * page_info['page_size']})"
+                            ),
+                        )
+                        selected = [drill_table]
+                        yield {
+                            "type": "status",
+                            "message": (
+                                f"Continuing prior query — user ids{name_note} page {page} "
+                                f"({page_info['page_size']} per page). "
+                                "Ask «next page» for more."
+                            ),
+                        }
+                        ask_trace(
+                            "drill_down_sql",
+                            question=original_question[:200],
+                            hit=True,
+                            sql_preview=(drill_sql or "")[:300],
+                            early=True,
+                            page=page,
+                            page_size=page_info["page_size"],
+                        )
+                    except ValueError:
+                        domain_resolved = None
+
+        if not domain_resolved and not config.HEX_STYLE_PIPELINE:
             domain_resolved = resolve_domain_sql(question, included_tables)
 
         if config.HEX_STYLE_PIPELINE and not domain_resolved:
             from notebook_planner import plan_notebook_steps
+            from question_intent import (
+                is_drill_down_data_request,
+                is_list_pagination_request,
+            )
 
             skip_chain = bool(
                 query_plan
                 and query_plan.intent in ("topic_search", "survey_distribution")
             )
+            # Never multi-step chain for «give those user id» / next page — single rewrite.
+            if is_drill_down_data_request(original_question) or is_list_pagination_request(
+                original_question
+            ):
+                skip_chain = True
             if (
                 not skip_chain
                 and config.SQL_CHAIN_ENABLED
@@ -2055,7 +2250,11 @@ def iter_ask(
             hints_map = _column_hints_map(selected)
             inferred, columns_by_table = _infer_hints_for_tables(selected)
             sql = template_sql
-            sql_source = "domain"
+            sql_source = (
+                "drill_down"
+                if "Drill-down" in (domain_reason or "")
+                else "domain"
+            )
             chain_steps = None
             routing_meta = {
                 **routing_meta,
@@ -2063,7 +2262,7 @@ def iter_ask(
                 "sql_source": sql_source,
             }
             ask_trace(
-                "domain_sql",
+                "domain_sql" if sql_source == "domain" else "drill_down_sql",
                 question=question[:200],
                 hit=True,
                 reason=domain_reason,
@@ -2183,32 +2382,161 @@ def iter_ask(
                         except ValueError:
                             template_sql = None
 
-                # Drill-down: rewrite prior COUNT → SELECT DISTINCT user_id (same WHERE).
+                # Drill-down: rewrite prior COUNT → SELECT DISTINCT user_id (paginated).
                 if not template_sql and prior_sql and not has_clarification:
                     from question_intent import (
                         is_drill_down_data_request,
+                        is_list_pagination_request,
+                        is_user_id_list_sql,
+                        parse_list_page_request,
                         rewrite_aggregate_to_user_list_sql,
                     )
 
-                    if is_drill_down_data_request(original_question) or is_drill_down_data_request(
+                    want_page = is_list_pagination_request(original_question)
+                    want_drill = is_drill_down_data_request(original_question) or is_drill_down_data_request(
                         question
-                    ):
-                        drill_sql = rewrite_aggregate_to_user_list_sql(prior_sql)
+                    )
+                    if want_page or want_drill:
+                        page_info = parse_list_page_request(
+                            original_question, prior_sql=prior_sql
+                        )
+                        page = page_info["page"] if (
+                            want_page or is_user_id_list_sql(prior_sql)
+                        ) else 1
+                        if want_drill and not want_page and not is_user_id_list_sql(prior_sql):
+                            page = 1
+                        drill_cols = dict(columns_by_table or {})
+                        name_pool = []
+                        for t in included_tables or []:
+                            short = (t.full_table_id or "").rsplit(".", 1)[-1].lower()
+                            if any(
+                                k in short
+                                for k in (
+                                    "profile_basic_details",
+                                    "master_data",
+                                    "users_master",
+                                )
+                            ):
+                                name_pool.append(t)
+                        if name_pool:
+                            _, extra_cols = _infer_hints_for_tables(name_pool)
+                            drill_cols.update(extra_cols)
+                        drill_sql = rewrite_aggregate_to_user_list_sql(
+                            prior_sql,
+                            page=page,
+                            page_size=page_info["page_size"],
+                            question=original_question,
+                            included_tables=included_tables,
+                            columns_by_table=drill_cols,
+                        )
                         if drill_sql:
                             try:
+                                from question_intent import question_wants_user_names
+
                                 template_sql = bq.validate_select_only(drill_sql)
                                 sql_source = "drill_down"
+                                with_names = question_wants_user_names(original_question)
                                 semantic_reason = (
-                                    "Drill-down — listing user_id with prior filters"
+                                    f"Drill-down page {page} — listing user_id"
+                                    f"{' + names' if with_names else ''}"
+                                    " with prior filters"
                                 )
                                 ask_trace(
                                     "drill_down_sql",
                                     question=original_question[:200],
                                     hit=True,
                                     sql_preview=(template_sql or "")[:300],
+                                    page=page,
                                 )
                             except ValueError:
                                 template_sql = None
+
+                # Raw / CSV / field-wise contextual feedback — before aggregate templates.
+                if not template_sql:
+                    try:
+                        from agents.answer_shape import wants_raw_tabular_data
+                        from feedback_sql import try_build_feedback_sql
+
+                        if getattr(plan, "answer_mode", "") == "raw" or wants_raw_tabular_data(
+                            question
+                        ):
+                            raw_sql = try_build_feedback_sql(
+                                question,
+                                selected,
+                                columns_by_table,
+                                relaxed=True,
+                            )
+                            if raw_sql and "GROUP BY" not in raw_sql.upper():
+                                template_sql = raw_sql
+                                semantic_reason = "Raw feedback export SQL"
+                                sql_source = "feedback_raw"
+                                ask_trace(
+                                    "feedback_raw_sql",
+                                    question=question[:200],
+                                    hit=True,
+                                    sql_preview=(template_sql or "")[:300],
+                                )
+                    except Exception as exc:
+                        ask_trace(
+                            "feedback_raw_sql",
+                            question=question[:200],
+                            hit=False,
+                            error=str(exc)[:120],
+                        )
+
+                # NPS templates first — planner often wrongly picks unique_responders.
+                if not template_sql:
+                    from nps_sql import is_nps_analytics_question
+
+                    if is_nps_analytics_question(question) or re.search(
+                        r"\bnps\b|\bpromoter|\bdetractor|\bpassive", question, re.I
+                    ):
+                        nps_sql = _try_nps_template_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            included_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                        )
+                        if nps_sql:
+                            template_sql = nps_sql
+                            semantic_reason = "NPS template SQL"
+                            sql_source = "nps_template"
+                            ask_trace(
+                                "nps_template_sql",
+                                question=question[:200],
+                                hit=True,
+                                sql_preview=(template_sql or "")[:300],
+                            )
+
+                # Placement / got-jobs counts — apply this year / period on date_of_placement.
+                if not template_sql:
+                    from placement_sql import is_placement_count_question
+
+                    if is_placement_count_question(question) or re.search(
+                        r"\bplaced\b|\bplacement\b|\bgot\s+jobs?\b", question, re.I
+                    ):
+                        place_sql = _try_placement_template_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            included_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                        )
+                        if place_sql:
+                            template_sql = place_sql
+                            semantic_reason = "Placement template SQL"
+                            sql_source = "placement_template"
+                            ask_trace(
+                                "placement_template_sql",
+                                question=question[:200],
+                                hit=True,
+                                sql_preview=(template_sql or "")[:300],
+                            )
 
                 if not template_sql and config.GLOSSARY_ENABLED and config.HEX_STYLE_PIPELINE:
                     template_sql, semantic_reason, semantic_tables, planner_plan = (
@@ -2226,26 +2554,6 @@ def iter_ask(
                     if template_sql:
                         sql_source = "rag"
                         query_plan = planner_plan or query_plan
-                # NPS templates must run in hex mode too — planner often picks unique_responders.
-                if not template_sql:
-                    from nps_sql import is_nps_analytics_question
-
-                    if is_nps_analytics_question(question) or re.search(
-                        r"\bnps\b", question, re.I
-                    ):
-                        nps_sql = _try_nps_template_sql(
-                            question,
-                            selected,
-                            hints_map,
-                            inferred,
-                            columns_by_table,
-                            included_tables=included_tables,
-                            schema_entities=query_ctx.schema_entities,
-                        )
-                        if nps_sql:
-                            template_sql = nps_sql
-                            semantic_reason = "NPS template SQL"
-                            sql_source = "nps_template"
                 pattern_match = try_learned_pattern(question)
                 if not template_sql and pattern_match:
                     template_sql = pattern_match.sql
@@ -2870,12 +3178,17 @@ def iter_ask(
     if query_plan and query_plan.viz_hint:
         presentation_hints.append(f"viz_hint:{query_plan.viz_hint}")
     table_kb_context = kb.build_answer_kb_context(knowledges)
+    # Present against the user's original wording (not expanded drill-down prompt).
+    present_q = display_question or original_question or question
+    # Drill-down must never use multi-step chain analysis.
+    present_steps = None if (sql_source == "drill_down" or not chain_steps) else chain_steps
     try:
         viz_rows, chart_spec, analysis = llm.build_presentation(
-            question,
+            present_q,
             columns,
             rows,
             sample=sample,
+            chain_steps=present_steps,
             sql=sql or "",
             entity_label=query_ctx.entity_label,
             presentation_hints=presentation_hints,
@@ -2889,9 +3202,9 @@ def iter_ask(
         from chart_prepare import prepare_chart
 
         ask_trace("presentation_fallback", error=str(pres_err)[:200])
-        fallback_spec = infer_chart_spec(question, columns, rows)
-        viz_rows, chart_spec = prepare_chart(rows, columns, fallback_spec, question)
-        analysis = heuristic_analyze(question, columns, rows, len(rows))
+        fallback_spec = infer_chart_spec(present_q, columns, rows)
+        viz_rows, chart_spec = prepare_chart(rows, columns, fallback_spec, present_q)
+        analysis = heuristic_analyze(present_q, columns, rows, len(rows), sql=sql or "")
 
     # Empty / zero results: tell the user what date ranges actually have data.
     if _looks_empty_result(rows):

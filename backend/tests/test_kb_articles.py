@@ -59,7 +59,7 @@ class KbArticleTests(unittest.TestCase):
             "how many users have learning portal active", table, knowledge
         )
         self.assertIn(table.full_table_id, cols)
-        self.assertTrue(any("pause_status" in f for f in filters))
+        self.assertEqual(measure, "active_learning_portal_users")
 
     @patch("llm.route_with_kb")
     def test_route_question_validates_columns(self, mock_route):

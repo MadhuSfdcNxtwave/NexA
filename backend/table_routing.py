@@ -90,11 +90,8 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
         id="learning_portal_active_users",
         table_short="z_ccbp_academy_users_master_data",
         question_re=_PORTAL_ACTIVE_COUNT,
-        reason="Active learning portal users (master profile — not paused, access granted)",
-        filters=(
-            SqlFilter("pause_status", "IS NULL"),
-            SqlFilter("learning_portal_onboarding_access_given_datetime", "IS NOT NULL"),
-        ),
+        reason="Active learning portal users (master profile — every row is active)",
+        filters=(),
         score_penalty_shorts=("question_wise", "question_set", "day_and_page_wise"),
     ),
     RoutingRule(
@@ -138,9 +135,25 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
     RoutingRule(
         id="contextual_feedback",
         table_short="users_contextual_feedback_details",
-        question_re=re.compile(r"\b(feedback|emoji)\b", re.I),
+        question_re=re.compile(
+            r"\bcontextual\s+feedback\b|"
+            r"\bfeedback_details\b|"
+            r"\bemotion\b|"
+            r"\bemoji\b|"
+            # Generic feedback — still pin contextual unless NPS/live-class/coach cues win earlier.
+            r"\bfeedback\b",
+            re.I,
+        ),
         reason="Contextual feedback responses",
-        score_penalty_shorts=("nps_form", "cloudwatch"),
+        score_penalty_shorts=(
+            "nps_form",
+            "cloudwatch",
+            "live_classes_user_feedback",
+            "event_engagement",
+            "batch_registration_form",
+            "feedback_successcoach",
+            "nw_events",
+        ),
     ),
     RoutingRule(
         id="learning_portal_page_activity",
@@ -247,6 +260,29 @@ def compound_domain_table_ids(question: str, included: list[Any]) -> list[str]:
     return picked
 
 
+def _norm_table_short(name: str) -> str:
+    n = (name or "").lower()
+    if n.startswith("z_"):
+        n = n[2:]
+    return n
+
+
+def resolve_table_id(included: list[Any], table_short: str) -> str | None:
+    """Match catalog short names with optional z_ prefix (YAML model ids)."""
+    want = _norm_table_short(table_short)
+    # Prefer exact short match, then normalized (z_ stripped).
+    exact: str | None = None
+    normalized: str | None = None
+    for t in included:
+        short = t.full_table_id.rsplit(".", 1)[-1]
+        if short == table_short or short.lower() == table_short.lower():
+            exact = t.full_table_id
+            break
+        if _norm_table_short(short) == want:
+            normalized = normalized or t.full_table_id
+    return exact or normalized
+
+
 def match_routing_rule(question: str) -> RoutingRule | None:
     q = normalize_question(question)
     if not q:
@@ -254,8 +290,14 @@ def match_routing_rule(question: str) -> RoutingRule | None:
     for rule in ROUTING_RULES:
         if not rule.question_re.search(q):
             continue
-        if rule.id == "contextual_feedback" and re.search(r"\bnps\b", q, re.I):
-            continue
+        if rule.id == "contextual_feedback":
+            # NPS / live-class / coach feedback are different datasets.
+            if re.search(r"\bnps\b", q, re.I):
+                continue
+            if re.search(r"\blive[\s_-]*class\b.{0,30}\bfeedback\b|\bfeedback\b.{0,30}\blive[\s_-]*class\b", q, re.I):
+                continue
+            if re.search(r"\bsuccess\s*coach\b.{0,20}\bfeedback\b|\bfeedback\b.{0,20}\bsuccess\s*coach\b", q, re.I):
+                continue
         return rule
     return None
 
@@ -267,11 +309,8 @@ def pin_table(question: str, included: list[Any]) -> list[str]:
     rule = match_routing_rule(question)
     if not rule:
         return []
-    for t in included:
-        short = t.full_table_id.rsplit(".", 1)[-1]
-        if short == rule.table_short:
-            return [t.full_table_id]
-    return []
+    fq = resolve_table_id(included, rule.table_short)
+    return [fq] if fq else []
 
 
 def routing_reason(question: str, table_short: str) -> str:
@@ -288,11 +327,16 @@ def score_adjustment(question: str, short_name: str) -> int:
         return 0
     name = short_name.lower()
     delta = 0
-    if name == rule.table_short.lower():
+    if _norm_table_short(name) == _norm_table_short(rule.table_short) or name == rule.table_short.lower():
         delta += rule.score_boost
     for bad in rule.score_penalty_shorts:
         if bad in name:
             delta -= 400
+    # Extra: "contextual feedback" must not land on live-class / event tables.
+    if rule.id == "contextual_feedback":
+        if re.search(r"\bcontextual\s+feedback\b", question or "", re.I):
+            if any(x in name for x in ("live_class", "event_engagement", "batch_registration", "nps")):
+                delta -= 600
     return delta
 
 
@@ -322,8 +366,10 @@ def validate_sql_table_choice(question: str, sql: str) -> tuple[bool, str]:
                 if bad in sql_l:
                     return False, f"wrong table fragment `{bad}`"
             return True, ""
-    if rule.table_short.lower() not in sql_l:
-        return False, f"expected table `{rule.table_short}`"
+    if rule.table_short.lower() not in sql_l and _norm_table_short(rule.table_short) not in sql_l:
+        # Accept z_ prefixed catalog names in SQL.
+        if f"z_{rule.table_short.lower()}" not in sql_l:
+            return False, f"expected table `{rule.table_short}`"
     for bad in rule.score_penalty_shorts:
         if bad in sql_l:
             return False, f"wrong table fragment `{bad}`"

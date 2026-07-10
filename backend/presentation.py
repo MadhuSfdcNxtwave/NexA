@@ -38,6 +38,15 @@ def infer_chart_spec(
     numeric_cols = [c for c in columns if _is_numeric(rows[0].get(c))]
     text_cols = [c for c in columns if c not in numeric_cols]
 
+    # Single-column id lists → table, never a fake KPI chart
+    cols_l = [str(c).lower() for c in columns]
+    if n_cols == 1 and cols_l[0] in ("user_id", "uid", "userid") and n_rows >= 1:
+        return {"chart": "none", "title": f"{n_rows:,} user ids", "prefer_table": True}
+    if "user_id" in cols_l and any(
+        c in cols_l for c in ("user_name", "first_name", "last_name", "full_name", "name")
+    ):
+        return {"chart": "none", "title": f"{n_rows:,} users", "prefer_table": True}
+
     # Single KPI answer
     if n_rows == 1 and n_cols == 1:
         col = columns[0]
@@ -113,13 +122,163 @@ def format_metric_value(val: Any) -> str:
         return str(val)
 
 
+def is_user_id_list_result(
+    columns: list[str],
+    rows: list[dict] | None = None,
+    *,
+    sql: str = "",
+    question: str = "",
+) -> bool:
+    """True when the result is a flat list of user ids (drill-down), not a metric."""
+    cols = [str(c or "").strip() for c in (columns or [])]
+    cols_l = [c.lower() for c in cols]
+    if len(cols_l) == 1 and cols_l[0] in ("user_id", "uid", "userid", "user id"):
+        return True
+    # user_id + name columns
+    if "user_id" in cols_l and any(
+        c in cols_l for c in ("user_name", "first_name", "last_name", "full_name", "name")
+    ):
+        return True
+    if sql and re.search(r"SELECT\s+DISTINCT\s+[`\"]?user_id[`\"]?", sql, re.I):
+        if not re.search(r"\bCOUNT\s*\(", sql, re.I):
+            return True
+    if sql and re.search(r"[`\"]?user_name[`\"]?", sql, re.I) and re.search(
+        r"[`\"]?user_id[`\"]?", sql, re.I
+    ):
+        if not re.search(r"\bCOUNT\s*\(", sql, re.I):
+            return True
+    q = (question or "").lower()
+    if rows and "user_id" in cols_l and re.search(r"\b(user[_\s]?ids?|userids?|uid|names?)\b", q):
+        return True
+    return False
+
+
+def analyze_user_id_list(
+    question: str,
+    columns: list[str],
+    rows: list[dict],
+    *,
+    sql: str = "",
+    page_size: int = 500,
+) -> str:
+    """Detailed, accurate write-up for paginated user_id drill-downs."""
+    q = (question or "").strip().rstrip("?") or "the prior result"
+    n = len(rows or [])
+    cols_l = {str(c).lower(): str(c) for c in (columns or [])}
+    id_col = cols_l.get("user_id") or (columns[0] if columns else "user_id")
+    name_col = (
+        cols_l.get("user_name")
+        or cols_l.get("full_name")
+        or cols_l.get("name")
+        or None
+    )
+    has_split_names = "first_name" in cols_l and "last_name" in cols_l
+    if n == 0:
+        return (
+            f"No `{id_col}` values matched the same filters as: {q}. "
+            "Try widening the date range or checking the prior count filters."
+        )
+
+    def _row_name(r: dict) -> str:
+        if name_col and r.get(name_col):
+            return str(r.get(name_col)).strip()
+        if has_split_names:
+            return (
+                f"{r.get(cols_l['first_name']) or ''} {r.get(cols_l['last_name']) or ''}"
+            ).strip()
+        return ""
+
+    samples = []
+    for r in rows[:8]:
+        uid = str(r.get(id_col) or "")
+        nm = _row_name(r)
+        samples.append(f"{nm} ({uid})" if nm else uid)
+    sample_txt = ", ".join(samples)
+    if n > 8:
+        sample_txt += ", …"
+
+    # Detect page from SQL OFFSET
+    page = 1
+    offset = 0
+    m = re.search(r"\bLIMIT\s+(\d+)\s+OFFSET\s+(\d+)", sql or "", re.I)
+    if m:
+        page_size = int(m.group(1)) or page_size
+        offset = int(m.group(2))
+        page = (offset // page_size) + 1 if page_size else 1
+    elif re.search(r"\bLIMIT\s+(\d+)\s*$", sql or "", re.I):
+        m2 = re.search(r"\bLIMIT\s+(\d+)\s*$", sql or "", re.I)
+        if m2:
+            page_size = int(m2.group(1)) or page_size
+
+    joined_names = bool(name_col or has_split_names) or bool(
+        re.search(r"academy_user_profile_basic_details|master_data", sql or "", re.I)
+    )
+    lines = [
+        f"Here are the distinct `{id_col}`"
+        + (" and names" if joined_names else "")
+        + f" for: {q}.",
+        f"This page shows {n:,} row(s) (page {page}, up to {page_size:,} per page).",
+    ]
+    if joined_names:
+        lines.append(
+            "Names come from `academy_user_profile_basic_details` "
+            "(or master) via user_id join when the fact table has no name columns."
+        )
+    if sample_txt:
+        lines.append(f"Sample: {sample_txt}.")
+    lines.append("Open the Table tab to browse or expand the full page.")
+    if n >= page_size:
+        lines.append(
+            f"This page is full ({page_size:,} rows). Ask «next page» in this thread "
+            "to fetch the next BigQuery batch with the same filters."
+        )
+    else:
+        lines.append("This looks like the last page for these filters (fewer rows than the page size).")
+    return "\n\n".join(lines)
+
+
+def suggest_id_list_followups(
+    question: str = "",
+    *,
+    sql: str = "",
+    columns: list[str] | None = None,
+    selected_tables: list[str] | None = None,
+) -> list[str]:
+    """Deterministic follow-up chips after a user_id list / drill-down."""
+    suggestions = ["next page", "export as CSV"]
+    sql_l = (sql or "").lower()
+    tables = " ".join(selected_tables or []).lower()
+    q = (question or "").lower()
+    blob = f"{sql_l} {tables} {q}"
+    if "placement" in blob:
+        suggestions.append("count by placement type")
+    elif "feedback" in blob or "contextual" in blob:
+        suggestions.append("break down by feedback type")
+    elif "nps" in blob:
+        suggestions.append("count by NPS category")
+    elif "attendance" in blob or "live_class" in blob:
+        suggestions.append("count by attendance status")
+    else:
+        suggestions.append("break this down by category")
+    # Dedupe while preserving order
+    out: list[str] = []
+    for s in suggestions:
+        if s not in out:
+            out.append(s)
+    return out[:4]
+
+
 def heuristic_analyze(
     question: str,
     columns: list[str],
     rows: list[dict],
     row_count: int,
+    *,
+    sql: str = "",
 ) -> str:
     """Plain-English summary when the VIZ LLM is unavailable."""
+    if is_user_id_list_result(columns, rows, sql=sql, question=question):
+        return analyze_user_id_list(question, columns, rows, sql=sql)
     q = (question or "").strip().rstrip("?")
     if not rows:
         return f"No data was returned for: {q}."

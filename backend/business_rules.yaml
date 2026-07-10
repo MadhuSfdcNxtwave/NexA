@@ -4,11 +4,11 @@
 metrics:
   active_learning_portal_users:
     table_short: z_ccbp_academy_users_master_data
-    filters:
-      - "pause_status IS NULL"
-      - "learning_portal_onboarding_access_given_datetime IS NOT NULL"
+    filters: []
     description: >-
-      Users with portal onboarding access granted and not paused (~34,791).
+      Every row in master data is an active learning-portal user.
+      Do NOT add pause_status or onboarding-access filters unless the question
+      explicitly asks about paused users or portal access grant.
       NOT lp_status=ACTIVE on the engagement table.
 
   lp_status_active_users:

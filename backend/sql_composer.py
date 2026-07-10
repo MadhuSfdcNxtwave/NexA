@@ -198,11 +198,20 @@ def compose_breakdown_with_join(
 
 def enrich_schema_with_measures(schema_text: str, table: object) -> str:
     from semantic_layer import measures_block, semantic_for_table
+    from table_business_rules import get_table_business_rules
 
     sem = semantic_for_table(table)
     if not sem:
         return schema_text
     block = measures_block(sem)
+    rules = get_table_business_rules(table)
+    if rules:
+        short = getattr(table, "full_table_id", "").rsplit(".", 1)[-1]
+        rule_lines = [
+            f"# Table business rules for `{short}` (follow when composing measures):",
+            *[f"#   {ln.strip()[:240]}" for ln in rules.splitlines() if ln.strip()][:20],
+        ]
+        block = "\n".join(rule_lines) + (("\n" + block) if block else "")
     if block and block not in schema_text:
         return f"{schema_text}\n\n{block}"
     return schema_text

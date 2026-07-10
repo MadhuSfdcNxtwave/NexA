@@ -36,9 +36,26 @@ class TableBusinessRulesTests(unittest.TestCase):
             business_rules="Do not add WHERE filters.\nCount all rows.",
         )
         block = format_table_rules_block([t])
-        self.assertIn("BUSINESS RULES", block)
+        self.assertIn("RULES for", block)
         self.assertIn("Do not add WHERE filters", block)
         self.assertIn("Do NOT add pause_status", block)
+
+    def test_mandatory_preamble_and_prepend(self):
+        from table_business_rules import (
+            build_mandatory_rules_preamble,
+            prepend_rules_to_schema,
+        )
+
+        t = SimpleNamespace(
+            full_table_id="p.d.academy_nps_form_responses",
+            business_rules="Promoters: Rating 9–10\nUse COUNT(*) for responses.",
+        )
+        preamble = build_mandatory_rules_preamble([t])
+        self.assertIn("MANDATORY", preamble)
+        self.assertIn("Promoters", preamble)
+        schema = prepend_rules_to_schema("schema body here", [t])
+        self.assertTrue(schema.startswith("# ==="))
+        self.assertIn("schema body here", schema)
 
     def test_sql_filters_empty_when_rules_skip(self):
         from table_routing import sql_filters_for_table
