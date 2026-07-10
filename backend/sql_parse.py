@@ -21,8 +21,10 @@ _WRITE_TYPES = (
     exp.Merge,
 )
 
+# Insert a space before major clauses when the LLM glues them (e.g. `tWHERE`, `)FROM`).
+# Do NOT split identifiers like `question_order` / `user_limit` (underscore before the keyword).
 _GLUE_BEFORE_KW = re.compile(
-    r"([a-zA-Z0-9_\)])(?=(FROM|WHERE|JOIN|GROUP|ORDER|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b)",
+    r"(?<=[a-zA-Z0-9\)])(?<!_)(?=(?:FROM|WHERE|JOIN|GROUP|ORDER|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b)",
     re.IGNORECASE,
 )
 
@@ -113,7 +115,7 @@ def normalize_llm_sql(sql: str) -> str:
     text = strip_sql_line_comments((sql or "").strip())
     if not text:
         return text
-    text = _GLUE_BEFORE_KW.sub(r"\1 ", text)
+    text = _GLUE_BEFORE_KW.sub(" ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 

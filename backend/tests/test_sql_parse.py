@@ -36,6 +36,24 @@ def test_normalize_llm_sql_strips_comments_before_parse():
     assert "WHEN x <= 6" in cleaned
 
 
+def test_normalize_llm_sql_preserves_question_order_column():
+    raw = (
+        "SELECT `user_id`, `question_order`, `feedback_id` "
+        "FROM `p.d.users_contextual_feedback_details` "
+        "ORDER BY `submitted_date` DESC"
+    )
+    cleaned = normalize_llm_sql(raw)
+    assert "`question_order`" in cleaned
+    assert "question_ order" not in cleaned
+
+
+def test_normalize_llm_sql_still_splits_glued_clauses():
+    raw = "SELECT * FROM tWHERE x = 1ORDER BY y LIMIT 10"
+    cleaned = normalize_llm_sql(raw)
+    assert "FROM t WHERE" in cleaned or "t WHERE" in cleaned
+    assert "1 ORDER BY" in cleaned or "1 ORDER" in cleaned
+
+
 def test_normalize_user_id_joins_both_sides():
     sql = "LEFT JOIN p ON s.`user_id` = p.`user_id`"
     out = normalize_user_id_joins(sql)
