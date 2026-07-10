@@ -119,8 +119,10 @@ def _pick_master_table(
 
 
 def _master_join_on(nps_fq: str, master_fq: str) -> str:
-    """Standard join: NPS user_id has hyphens, master often does not."""
-    return f"REPLACE(n.`user_id`, '-', '') = m.`user_id`"
+    """Standard join: normalize hyphens on BOTH sides (formats differ by table)."""
+    return (
+        "REPLACE(n.`user_id`, '-', '') = REPLACE(m.`user_id`, '-', '')"
+    )
 
 
 def _breakdown_dim(question: str, cols: set[str]) -> str | None:

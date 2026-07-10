@@ -1,6 +1,13 @@
 # Single source of truth for business metrics and date keywords.
 # glossary.yaml + table_routing.py remain for routing; this file feeds SQL prompts.
 
+# Applies to EVERY table join on user identifiers.
+global_join_rule: >-
+  When joining any tables on user_id (also discussion_user_id, meet_host_user_id, uid__c),
+  ALWAYS use REPLACE on BOTH sides:
+  REPLACE(a.user_id, '-', '') = REPLACE(b.user_id, '-', '').
+  Never use bare a.user_id = b.user_id — UUID hyphen formats differ across tables.
+
 metrics:
   active_learning_portal_users:
     table_short: z_ccbp_academy_users_master_data

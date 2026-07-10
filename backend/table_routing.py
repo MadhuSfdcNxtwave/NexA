@@ -429,7 +429,7 @@ def compound_sql_hints(question: str) -> str:
                 "# JOIN pattern:",
                 "#   FROM `...z_academy_users_live_classes_attendance_and_time_spent_details` a",
                 "#   JOIN `...z_ccbp_academy_users_master_data` m",
-                "#     ON REPLACE(a.user_id, '-', '') = m.user_id",
+                "#     ON REPLACE(a.user_id, '-', '') = REPLACE(m.user_id, '-', '')",
                 "# WHERE DATE(a.slot_date) = <asked date>",
                 "#   AND a.attendance_status = 'JOINED'",
                 "#   AND m.pause_status IS NULL",

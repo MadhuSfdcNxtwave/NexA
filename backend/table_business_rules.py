@@ -70,6 +70,10 @@ def build_mandatory_rules_preamble(
                 "# Rules override default measures, glossary filters, and habits.",
                 "# If a rule conflicts with anything else in this prompt, FOLLOW THE RULE.",
                 "# ============================================================",
+                "# GLOBAL JOIN RULE (every table): user_id formats differ (with/without hyphens).",
+                "# ALWAYS join with BOTH sides normalized:",
+                "#   REPLACE(a.user_id, '-', '') = REPLACE(b.user_id, '-', '')",
+                "# Never write bare a.user_id = b.user_id. Same for discussion_user_id / uid__c.",
             ]
         )
 

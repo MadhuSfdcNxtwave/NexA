@@ -121,7 +121,7 @@ def compose_placed_by_state_sql(question: str, tables: list[Any]) -> str | None:
   COUNT(DISTINCT p.`user_id`) AS `placed_users`
 FROM `{pf}` AS p
 LEFT JOIN `{bf}` AS b
-  ON REPLACE(b.`user_id`, '-', '') = p.`user_id`
+  ON REPLACE(b.`user_id`, '-', '') = REPLACE(p.`user_id`, '-', '')
 GROUP BY `state`
 ORDER BY `placed_users` DESC"""
 
@@ -141,7 +141,7 @@ def compose_nps_by_gender_sql(question: str, tables: list[Any]) -> str | None:
   COUNT(DISTINCT n.`user_id`) AS `respondents`
 FROM `{nf}` n
 INNER JOIN `{mf}` m
-  ON REPLACE(n.`user_id`, '-', '') = m.`user_id`
+  ON REPLACE(n.`user_id`, '-', '') = REPLACE(m.`user_id`, '-', '')
 WHERE m.`gender` IS NOT NULL
   AND n.`{rating_col}` IS NOT NULL
 GROUP BY m.`gender`
@@ -161,7 +161,7 @@ def compose_jobs_by_gender_sql(question: str, tables: list[Any]) -> str | None:
   COUNT(DISTINCT j.`user_id`) AS `unique_applicants`
 FROM `{jf}` j
 INNER JOIN `{mf}` m
-  ON j.`user_id` = m.`user_id`
+  ON REPLACE(j.`user_id`, '-', '') = REPLACE(m.`user_id`, '-', '')
 WHERE m.`gender` IS NOT NULL
 GROUP BY m.`gender`
 ORDER BY `unique_applicants` DESC"""
@@ -232,7 +232,7 @@ def compose_portal_activity_attendance_pct_sql(question: str, tables: list[Any])
   ) AS `live_class_attendance_pct`
 FROM `{pf}` AS p
 LEFT JOIN `{af}` AS a
-  ON REPLACE(p.`user_id`, '-', '') = a.`user_id`
+  ON REPLACE(p.`user_id`, '-', '') = REPLACE(a.`user_id`, '-', '')
 WHERE {where_sql}
 GROUP BY p.`time_spent_page`
 ORDER BY `active_portal_users` DESC

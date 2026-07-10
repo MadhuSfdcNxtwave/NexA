@@ -108,14 +108,20 @@ def relations_for_tables(
 
 def filter_join_hints_text(join_hints: str, selected_short: set[str]) -> str:
     """Keep only join lines relevant to the selected table set."""
+    from sql_parse import normalize_user_id_joins
+
     rels = relations_for_tables(parse_join_hints(join_hints), selected_short)
     if not rels:
         return ""
     lines = [
-        f"- {r.source} -> {r.target} ({r.rel_type}): {r.join_sql}"
+        f"- {r.source} -> {r.target} ({r.rel_type}): {normalize_user_id_joins(r.join_sql)}"
         for r in rels
     ]
-    return "# Join hints for selected tables (use these ON conditions exactly)\n" + "\n".join(lines)
+    return (
+        "# Join hints for selected tables\n"
+        "# GLOBAL: always REPLACE(user_id,'-','') on BOTH sides of user_id joins\n"
+        + "\n".join(lines)
+    )
 
 
 def relation_line(rel: JoinRelation) -> str:

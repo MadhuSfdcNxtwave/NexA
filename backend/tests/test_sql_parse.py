@@ -1,7 +1,11 @@
 """Tests for SQL normalization helpers."""
 from __future__ import annotations
 
-from sql_parse import normalize_llm_sql, strip_sql_line_comments
+from sql_parse import (
+    normalize_llm_sql,
+    normalize_user_id_joins,
+    strip_sql_line_comments,
+)
 
 
 def test_strip_line_comments_inside_case():
@@ -30,3 +34,32 @@ def test_normalize_llm_sql_strips_comments_before_parse():
     cleaned = normalize_llm_sql(raw)
     assert "promoter" not in cleaned
     assert "WHEN x <= 6" in cleaned
+
+
+def test_normalize_user_id_joins_both_sides():
+    sql = "LEFT JOIN p ON s.`user_id` = p.`user_id`"
+    out = normalize_user_id_joins(sql)
+    assert "REPLACE(s.`user_id`, '-', '') = REPLACE(p.`user_id`, '-', '')" in out
+
+
+def test_normalize_user_id_joins_one_sided():
+    sql = "ON REPLACE(n.`user_id`, '-', '') = m.`user_id`"
+    out = normalize_user_id_joins(sql)
+    assert "REPLACE(n.`user_id`, '-', '') = REPLACE(m.`user_id`, '-', '')" in out
+
+
+def test_normalize_user_id_joins_hex_hints():
+    hint = '${user_id} = ${academy_user_profile_basic_details.user_id}'
+    out = normalize_user_id_joins(hint)
+    assert "REPLACE(${user_id}, '-', '')" in out
+    assert "REPLACE(${academy_user_profile_basic_details.user_id}, '-', '')" in out
+
+
+def test_normalize_user_id_joins_preserves_extra_and():
+    sql = (
+        "ON s.`user_id` = p.`user_id` "
+        "AND DATE_TRUNC(s.`month`, MONTH) = p.`month`"
+    )
+    out = normalize_user_id_joins(sql)
+    assert "REPLACE(s.`user_id`, '-', '') = REPLACE(p.`user_id`, '-', '')" in out
+    assert "DATE_TRUNC(s.`month`, MONTH) = p.`month`" in out

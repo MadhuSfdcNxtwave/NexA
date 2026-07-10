@@ -57,6 +57,9 @@ def prompt_block_for_question(question: str, tables: list | None = None) -> str:
     from table_business_rules import table_skips_default_filters
 
     lines: list[str] = []
+    global_join = (load_rules().get("global_join_rule") or "").strip()
+    if global_join:
+        lines.append(f"# GLOBAL JOIN RULE: {global_join}")
     q = (question or "").lower()
     skip_yaml = any(table_skips_default_filters(t) for t in (tables or []))
 
