@@ -51,6 +51,12 @@ def _compose_base_explore(question: str, tables: list[Any]) -> str | None:
 FROM `{fq}`
 WHERE `{rating}` IS NOT NULL"""
     if "master" in short:
+        from table_business_rules import table_skips_default_filters
+
+        if table_skips_default_filters(t):
+            return f"""SELECT
+  COUNT(DISTINCT `user_id`) AS `user_count`
+FROM `{fq}`"""
         return f"""SELECT
   COUNT(DISTINCT `user_id`) AS `user_count`
 FROM `{fq}`

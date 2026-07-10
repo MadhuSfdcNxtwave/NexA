@@ -213,7 +213,20 @@ def parse_yaml_documents(text: str) -> list[dict[str, Any]]:
     if not raw_docs:
         raise ModelYamlError("No model found in YAML")
 
-    return [parse_model_document(d) for d in raw_docs]
+    out: list[dict[str, Any]] = []
+    for doc in raw_docs:
+        # Skip logical / stub models that have no BigQuery base table.
+        if isinstance(doc, dict):
+            doc_type = str(doc.get("type") or "").strip().lower()
+            has_base = bool(
+                doc.get("base_sql_table") or doc.get("base_table") or doc.get("sql_table")
+            )
+            if doc_type == "logical_model" or not has_base:
+                continue
+        out.append(parse_model_document(doc))
+    if not out:
+        raise ModelYamlError("No importable models found (need base_sql_table)")
+    return out
 
 
 def merge_join_hints(existing: str, new_lines: list[str]) -> str:

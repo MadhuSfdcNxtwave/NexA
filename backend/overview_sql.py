@@ -224,7 +224,11 @@ def try_build_overview_sql(
     if not id_col:
         return None
 
-    active = _active_clause(cols, overview, portal=bool(_PORTAL.search(q)))
+    from table_business_rules import table_skips_default_filters
+
+    active = None
+    if not table_skips_default_filters(table):
+        active = _active_clause(cols, overview, portal=bool(_PORTAL.search(q)))
     if active and (_ACTIVE.search(q) or _PORTAL.search(q)):
         where.append(active)
         label_bits.append("active")

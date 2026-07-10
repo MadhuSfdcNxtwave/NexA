@@ -52,31 +52,42 @@ def date_hints_for_question(question: str) -> list[str]:
     return hints
 
 
-def prompt_block_for_question(question: str) -> str:
+def prompt_block_for_question(question: str, tables: list | None = None) -> str:
     """Compact block injected into SQL generation prompts."""
+    from table_business_rules import format_table_rules_block, table_skips_default_filters
+
     lines: list[str] = []
     q = (question or "").lower()
 
+    table_block = format_table_rules_block(tables or [])
+    if table_block:
+        lines.append(table_block)
+
+    skip_yaml = any(table_skips_default_filters(t) for t in (tables or []))
+
     if re.search(r"\bactive\b.{0,30}\b(learning[\s_-]*portal|portal)\b", q):
-        spec = get_metric("active_learning_portal_users")
-        if spec:
-            lines.append(f"# Business rule: {spec.get('description', '')}")
-            for f in spec.get("filters") or []:
-                lines.append(f"- WHERE {f}")
+        if not skip_yaml:
+            spec = get_metric("active_learning_portal_users")
+            if spec:
+                lines.append(f"# Business rule: {spec.get('description', '')}")
+                for f in spec.get("filters") or []:
+                    lines.append(f"- WHERE {f}")
 
     if re.search(r"\blp_status\b", q):
-        spec = get_metric("lp_status_active_users")
-        if spec:
-            lines.append(f"# Business rule: {spec.get('description', '')}")
-            for f in spec.get("filters") or []:
-                lines.append(f"- WHERE {f}")
+        if not skip_yaml:
+            spec = get_metric("lp_status_active_users")
+            if spec:
+                lines.append(f"# Business rule: {spec.get('description', '')}")
+                for f in spec.get("filters") or []:
+                    lines.append(f"- WHERE {f}")
 
     if re.search(r"\battend", q) and re.search(r"\blive[\s_-]*class|\bclass\b", q):
-        spec = get_metric("live_class_attendance")
-        if spec:
-            lines.append(f"# Business rule: {spec.get('description', '')}")
-            for f in spec.get("filters") or []:
-                lines.append(f"- WHERE {f}")
+        if not skip_yaml:
+            spec = get_metric("live_class_attendance")
+            if spec:
+                lines.append(f"# Business rule: {spec.get('description', '')}")
+                for f in spec.get("filters") or []:
+                    lines.append(f"- WHERE {f}")
 
     date_hints = date_hints_for_question(question)
     if date_hints:

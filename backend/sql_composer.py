@@ -74,7 +74,10 @@ def compose_sql(plan: MeasurePlan, question: str, table: object) -> str:
     alias = _alias_for_measure(plan)
 
     where_parts: list[str] = list(plan.filters)
-    if sem:
+    from table_business_rules import table_skips_default_filters
+
+    skip_defaults = table_skips_default_filters(table)
+    if sem and not skip_defaults:
         for m in sem.measures:
             if m.id == plan.measure.id and m.filters:
                 for fid in m.filters:
@@ -98,9 +101,10 @@ def compose_sql(plan: MeasurePlan, question: str, table: object) -> str:
 
     from table_routing import sql_filters_for_table
 
-    for clause in sql_filters_for_table(question, table):
-        if clause not in where_parts:
-            where_parts.append(clause)
+    if not skip_defaults:
+        for clause in sql_filters_for_table(question, table):
+            if clause not in where_parts:
+                where_parts.append(clause)
 
     where_parts = _dedupe_clauses(where_parts)
 

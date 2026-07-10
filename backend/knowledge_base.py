@@ -115,6 +115,7 @@ class TableKnowledge:
     column_descriptions: dict[str, str]
     column_types: dict[str, str]
     ai_overview: str = ""
+    business_rules: str = ""
     operational_guidance: str = ""
     endorsed: bool = False
     included_for_ai: bool = True
@@ -171,6 +172,7 @@ def load_table_knowledge(table: Any) -> TableKnowledge:
         column_descriptions=column_descriptions,
         column_types=column_types,
         ai_overview=(getattr(table, "ai_overview", "") or "").strip(),
+        business_rules=(getattr(table, "business_rules", "") or "").strip(),
         operational_guidance=operational_guidance,
         endorsed=bool(getattr(table, "endorsed", False)),
         included_for_ai=bool(getattr(table, "included_for_ai", True)),
@@ -243,19 +245,28 @@ def score_table_knowledge(
     knowledge: TableKnowledge,
     keywords: list[str],
 ) -> int:
-    """Score how well table + column descriptions match the question."""
+    """Score how well table + column descriptions (+ AI overview) match the question.
+
+    Table description and AI overview are first-class signals for routing —
+    not just table-name keyword overlap.
+    """
     name = knowledge.short_name.lower()
     desc = knowledge.table_description.lower()
     guidance = (knowledge.operational_guidance or "").lower()
+    overview = (knowledge.ai_overview or "").lower()
+    # Combined prose KB used for phrase / multi-token matching
+    prose = f"{desc}\n{guidance}\n{overview}".strip()
     score = 0
 
     for kw in keywords:
         if _keyword_in_name(kw, name):
             score += 18 if kw not in _GENERIC_KW else 8
         if kw in desc:
-            score += 10
+            score += 16  # table description is primary routing text
         if guidance and kw in guidance:
-            score += 6
+            score += 8
+        if overview and kw in overview:
+            score += 14  # AI overview = curated "when to use" profile
         for col, col_desc in knowledge.column_descriptions.items():
             col_lower = col.lower()
             blob = f"{col_lower} {col_desc}".lower()
@@ -265,6 +276,15 @@ def score_table_knowledge(
                 score += 7
             if kw in blob:
                 score += 4
+
+    # Multi-word question phrases in description / overview beat single tokens
+    if prose:
+        score += _phrase_hits(question, prose) * 22
+        q_tokens = [w for w in re.findall(r"[a-z0-9]+", question.lower()) if len(w) > 3]
+        # Reward dense overlap with description/overview (not just name)
+        prose_hits = sum(1 for t in q_tokens if t in prose and t not in _STOP)
+        if prose_hits >= 3:
+            score += 25 + min(prose_hits, 8) * 4
 
     domain_hits = _domain_name_hits(keywords, name)
     if domain_hits >= 2:
@@ -293,11 +313,11 @@ def score_table_knowledge(
         if "event_engagement" in name:
             score -= 40
 
-    overview = (knowledge.ai_overview or "").lower()
-    if overview:
-        for kw in keywords:
-            if kw in overview:
-                score += 5
+    # Prefer tables that actually have curated KB text filled in
+    if (knowledge.table_description or "").strip():
+        score += 8
+    if (knowledge.ai_overview or "").strip():
+        score += 12
 
     if knowledge.endorsed:
         score += 120
@@ -435,17 +455,24 @@ def build_knowledge_header(
     knowledges: list[TableKnowledge],
     column_matches: dict[str, list[ColumnMatch]],
 ) -> str:
-    """Compact knowledge-base block prepended to schema for SQL generation."""
+    """Compact knowledge-base block prepended to schema for SQL generation.
+
+    Table description + AI overview are the primary business context for both
+    SQL generation and the analysis answer — treat them as authoritative KB.
+    """
     lines = [
-        "# Knowledge base (table + column descriptions matched to this question)",
+        "# Knowledge base (AUTHORITATIVE — use for table meaning, SQL, and answers)",
+        "# Prefer TABLE DESCRIPTION and AI OVERVIEW over guessing from column names alone.",
         f"# Question: {question.strip()}",
     ]
     for k in knowledges:
         summary, guidance = split_table_description(k.table_description)
         if summary:
-            lines.append(f"# TABLE {k.short_name}: {summary[:600]}")
+            lines.append(f"# TABLE DESCRIPTION `{k.short_name}`: {summary[:800]}")
         elif k.table_description:
-            lines.append(f"# TABLE {k.short_name}: {k.table_description[:600]}")
+            lines.append(f"# TABLE DESCRIPTION `{k.short_name}`: {k.table_description[:800]}")
+        else:
+            lines.append(f"# TABLE `{k.short_name}`: (no description — rely on columns carefully)")
         guidance = guidance or (k.operational_guidance or "").strip()
         if guidance:
             lines.append(
@@ -457,14 +484,26 @@ def build_knowledge_header(
                 if ln:
                     lines.append(f"#   {ln[:240]}")
         if k.ai_overview:
-            lines.append(f"# AI OVERVIEW for `{k.short_name}` (real data profile — trust this):")
+            lines.append(
+                f"# AI OVERVIEW for `{k.short_name}` "
+                "(curated profile of what this table is for — trust for routing intent & answer framing):"
+            )
             for ln in k.ai_overview.splitlines():
                 ln = ln.strip()
                 if ln:
-                    lines.append(f"#   {ln[:200]}")
+                    lines.append(f"#   {ln[:220]}")
+        if k.business_rules:
+            lines.append(
+                f"# BUSINESS RULES for `{k.short_name}` "
+                "(MUST FOLLOW for SQL — override default measure filters when they conflict):"
+            )
+            for ln in k.business_rules.splitlines():
+                ln = ln.strip()
+                if ln:
+                    lines.append(f"#   {ln[:300]}")
         picked = [c for c in column_matches.get(k.full_table_id, []) if c.selected]
         if picked:
-            lines.append(f"# USE THESE COLUMNS for `{k.short_name}`:")
+            lines.append(f"# USE THESE COLUMNS for `{k.short_name}` (from column descriptions):")
             for c in picked[:12]:
                 desc = (c.description or "").strip()
                 if desc:
@@ -476,3 +515,24 @@ def build_knowledge_header(
 
 def merged_column_notes(knowledges: list[TableKnowledge]) -> dict[str, dict[str, str]]:
     return {k.full_table_id: dict(k.column_descriptions) for k in knowledges}
+
+
+def build_answer_kb_context(knowledges: list[TableKnowledge], *, max_chars: int = 1800) -> str:
+    """Compact description + AI overview for the analysis / answer step."""
+    parts: list[str] = []
+    for k in knowledges:
+        block: list[str] = [f"Source: {k.short_name}"]
+        summary, _ = split_table_description(k.table_description)
+        desc = (summary or k.table_description or "").strip()
+        if desc:
+            block.append(f"Description: {desc[:500]}")
+        overview = (k.ai_overview or "").strip()
+        if overview:
+            block.append(f"AI overview: {overview[:600]}")
+        rules = (k.business_rules or "").strip()
+        if rules:
+            block.append(f"Business rules: {rules[:500]}")
+        if len(block) > 1:
+            parts.append("\n".join(block))
+    text = "\n\n".join(parts).strip()
+    return text[:max_chars]

@@ -75,7 +75,7 @@ services:
       - key: EMBEDDING_RETRIEVAL_ENABLED
         value: "false"
       - key: SYNC_WORKSPACE_FROM_DATASET
-        value: "1"
+        value: "0"
 
   # ---- Frontend (static React build) ----
   - type: web

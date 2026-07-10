@@ -51,13 +51,17 @@ def resolve_compound_domain_sql(
         if rel:
             filt = date_filter_sql(date_col, rel[0], rel[1])
             where_parts.append(filt.replace(f"`{date_col}`", f"a.`{date_col}`"))
-        where_parts.extend(
-            [
-                "a.`attendance_status` = 'JOINED'",
-                "m.`pause_status` IS NULL",
-                "m.`learning_portal_onboarding_access_given_datetime` IS NOT NULL",
-            ]
-        )
+        where_parts.append("a.`attendance_status` = 'JOINED'")
+        master = by_fq.get(master_fq)
+        from table_business_rules import table_skips_default_filters
+
+        if not (master and table_skips_default_filters(master)):
+            where_parts.extend(
+                [
+                    "m.`pause_status` IS NULL",
+                    "m.`learning_portal_onboarding_access_given_datetime` IS NOT NULL",
+                ]
+            )
         sql = (
             "SELECT COUNT(DISTINCT a.`user_id`) AS `unique_users`\n"
             f"FROM `{attend_fq}` a\n"
