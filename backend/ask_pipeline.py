@@ -299,8 +299,7 @@ def _try_nps_template_sql(
     included_tables: list | None = None,
     schema_entities: list | None = None,
 ) -> str | None:
-    if not config.SQL_TEMPLATES_ENABLED:
-        return None
+    # Always on — NPS promoter/score/month templates must not depend on SQL_TEMPLATES_ENABLED.
     from memory_lookup import sql_matches_question_intent
     from nps_sql import try_build_nps_sql
 
@@ -2213,6 +2212,33 @@ def iter_ask(
                             except ValueError:
                                 template_sql = None
 
+                # NPS templates first — planner often wrongly picks unique_responders.
+                if not template_sql:
+                    from nps_sql import is_nps_analytics_question
+
+                    if is_nps_analytics_question(question) or re.search(
+                        r"\bnps\b|\bpromoter|\bdetractor|\bpassive", question, re.I
+                    ):
+                        nps_sql = _try_nps_template_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            included_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                        )
+                        if nps_sql:
+                            template_sql = nps_sql
+                            semantic_reason = "NPS template SQL"
+                            sql_source = "nps_template"
+                            ask_trace(
+                                "nps_template_sql",
+                                question=question[:200],
+                                hit=True,
+                                sql_preview=(template_sql or "")[:300],
+                            )
+
                 if not template_sql and config.GLOSSARY_ENABLED and config.HEX_STYLE_PIPELINE:
                     template_sql, semantic_reason, semantic_tables, planner_plan = (
                         _try_rag_compose_sql(
@@ -2229,26 +2255,6 @@ def iter_ask(
                     if template_sql:
                         sql_source = "rag"
                         query_plan = planner_plan or query_plan
-                # NPS templates must run in hex mode too — planner often picks unique_responders.
-                if not template_sql:
-                    from nps_sql import is_nps_analytics_question
-
-                    if is_nps_analytics_question(question) or re.search(
-                        r"\bnps\b", question, re.I
-                    ):
-                        nps_sql = _try_nps_template_sql(
-                            question,
-                            selected,
-                            hints_map,
-                            inferred,
-                            columns_by_table,
-                            included_tables=included_tables,
-                            schema_entities=query_ctx.schema_entities,
-                        )
-                        if nps_sql:
-                            template_sql = nps_sql
-                            semantic_reason = "NPS template SQL"
-                            sql_source = "nps_template"
                 pattern_match = try_learned_pattern(question)
                 if not template_sql and pattern_match:
                     template_sql = pattern_match.sql

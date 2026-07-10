@@ -193,9 +193,9 @@ CACHE_ROUTER_MODE = os.environ.get(
     "rules" if HEX_STYLE_PIPELINE else "llm",
 ).strip().lower()
 
-# Domain SQL templates (NPS/feedback/overview) — off by default: the generic
-# LLM pipeline handles any table. Enable only for curated small workspaces.
-SQL_TEMPLATES_ENABLED = os.environ.get("SQL_TEMPLATES_ENABLED", "false").strip().lower() in (
+# Domain SQL templates (NPS/feedback/overview). NPS templates always run in code;
+# this flag gates the other domain templates. Default on for curated workspaces.
+SQL_TEMPLATES_ENABLED = os.environ.get("SQL_TEMPLATES_ENABLED", "true").strip().lower() in (
     "1",
     "true",
     "yes",
