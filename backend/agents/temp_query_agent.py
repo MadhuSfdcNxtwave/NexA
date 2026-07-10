@@ -222,6 +222,9 @@ def run_temp_query_agent(
             prior_sql,
             page=page_info["page"],
             page_size=page_info["page_size"],
+            question=question,
+            included_tables=tables,
+            columns_by_table=columns_by_table,
         )
         if sql:
             return AgentResult(sql=sql, reason=plan.reason, plan=plan, source="temp_agent_drill")

@@ -67,6 +67,46 @@ class DrillDownContinuityTests(unittest.TestCase):
         shape = detect_answer_shape("show their user ids", prior_sql=prior)
         self.assertNotEqual(shape.mode, "aggregate")
 
+    def test_names_join_profile_basic_details(self):
+        from question_intent import (
+            is_drill_down_data_request,
+            question_wants_user_names,
+            rewrite_aggregate_to_user_list_sql,
+        )
+
+        q = "give there names and uid of 139 attended"
+        self.assertTrue(question_wants_user_names(q))
+        self.assertTrue(is_drill_down_data_request(q))
+
+        class T:
+            def __init__(self, fq):
+                self.full_table_id = fq
+
+        fact = "proj.ds.z_academy_users_live_classes_attendance_and_time_spent_details"
+        profile = "proj.ds.academy_user_profile_basic_details"
+        prior = (
+            f"SELECT COUNT(DISTINCT `user_id`) AS c FROM `{fact}` "
+            "WHERE `attendance_status` = 'JOINED' "
+            "AND DATE(`slot_date`) = DATE '2026-07-09'"
+        )
+        cols = {
+            fact: {"user_id", "attendance_status", "slot_date"},
+            profile: {"user_id", "first_name", "last_name"},
+        }
+        out = rewrite_aggregate_to_user_list_sql(
+            prior,
+            question=q,
+            included_tables=[T(fact), T(profile)],
+            columns_by_table=cols,
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("academy_user_profile_basic_details", out)
+        self.assertIn("user_name", out)
+        self.assertIn("first_name", out)
+        self.assertIn("JOINED", out)
+        self.assertIn("2026-07-09", out)
+        self.assertIn("LEFT JOIN", out)
+
     def test_id_list_followup_chips(self):
         from presentation import suggest_id_list_followups
 

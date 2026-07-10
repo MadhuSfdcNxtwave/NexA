@@ -2133,10 +2133,31 @@ def iter_ask(
                 page = page_info["page"] if (want_page or is_user_id_list_sql(prior_sql)) else 1
                 if want_drill and not want_page and not is_user_id_list_sql(prior_sql):
                     page = 1
+                # Include profile/master columns so name JOINs can resolve even when
+                # the Ask plan only selected the fact table.
+                drill_cols = dict(columns_by_table or {})
+                name_pool = []
+                for t in included_tables or []:
+                    short = (t.full_table_id or "").rsplit(".", 1)[-1].lower()
+                    if any(
+                        k in short
+                        for k in (
+                            "profile_basic_details",
+                            "master_data",
+                            "users_master",
+                        )
+                    ):
+                        name_pool.append(t)
+                if name_pool:
+                    _, extra_cols = _infer_hints_for_tables(name_pool)
+                    drill_cols.update(extra_cols)
                 rewritten = rewrite_aggregate_to_user_list_sql(
                     prior_sql,
                     page=page,
                     page_size=page_info["page_size"],
+                    question=original_question,
+                    included_tables=included_tables,
+                    columns_by_table=drill_cols,
                 )
                 drill_table = selected[0] if selected else None
                 if not drill_table:
@@ -2149,11 +2170,18 @@ def iter_ask(
                 if rewritten and drill_table:
                     try:
                         drill_sql = bq.validate_select_only(rewritten)
+                        from question_intent import question_wants_user_names
+
+                        name_note = (
+                            " + names from profile/master"
+                            if question_wants_user_names(original_question)
+                            else ""
+                        )
                         domain_resolved = (
                             drill_sql,
                             drill_table,
                             (
-                                f"Drill-down page {page} "
+                                f"Drill-down page {page}{name_note} "
                                 f"(LIMIT {page_info['page_size']} OFFSET {(page - 1) * page_info['page_size']})"
                             ),
                         )
@@ -2161,7 +2189,7 @@ def iter_ask(
                         yield {
                             "type": "status",
                             "message": (
-                                f"Continuing prior query — user ids page {page} "
+                                f"Continuing prior query — user ids{name_note} page {page} "
                                 f"({page_info['page_size']} per page). "
                                 "Ask «next page» for more."
                             ),
@@ -2377,17 +2405,41 @@ def iter_ask(
                         ) else 1
                         if want_drill and not want_page and not is_user_id_list_sql(prior_sql):
                             page = 1
+                        drill_cols = dict(columns_by_table or {})
+                        name_pool = []
+                        for t in included_tables or []:
+                            short = (t.full_table_id or "").rsplit(".", 1)[-1].lower()
+                            if any(
+                                k in short
+                                for k in (
+                                    "profile_basic_details",
+                                    "master_data",
+                                    "users_master",
+                                )
+                            ):
+                                name_pool.append(t)
+                        if name_pool:
+                            _, extra_cols = _infer_hints_for_tables(name_pool)
+                            drill_cols.update(extra_cols)
                         drill_sql = rewrite_aggregate_to_user_list_sql(
                             prior_sql,
                             page=page,
                             page_size=page_info["page_size"],
+                            question=original_question,
+                            included_tables=included_tables,
+                            columns_by_table=drill_cols,
                         )
                         if drill_sql:
                             try:
+                                from question_intent import question_wants_user_names
+
                                 template_sql = bq.validate_select_only(drill_sql)
                                 sql_source = "drill_down"
+                                with_names = question_wants_user_names(original_question)
                                 semantic_reason = (
-                                    f"Drill-down page {page} — listing user_id with prior filters"
+                                    f"Drill-down page {page} — listing user_id"
+                                    f"{' + names' if with_names else ''}"
+                                    " with prior filters"
                                 )
                                 ask_trace(
                                     "drill_down_sql",

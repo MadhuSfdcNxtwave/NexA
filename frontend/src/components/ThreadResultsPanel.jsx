@@ -38,7 +38,9 @@ function ResultsSkeleton() {
 function defaultTab(turn) {
   const cols = (turn.columns || []).map((c) => String(c).toLowerCase());
   const isIdList =
-    cols.length === 1 && ["user_id", "uid", "userid"].includes(cols[0]);
+    (cols.length === 1 && ["user_id", "uid", "userid"].includes(cols[0])) ||
+    (cols.includes("user_id") &&
+      cols.some((c) => ["user_name", "first_name", "last_name", "full_name", "name"].includes(c)));
   const preferTable = turn.chart_spec?.prefer_table || isIdList;
   const hasChart = turn.chart_spec?.chart && turn.chart_spec.chart !== "none";
   const hasTable = turn.rows?.length > 0 && turn.columns?.length > 0;
