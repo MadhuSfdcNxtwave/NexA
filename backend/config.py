@@ -257,6 +257,12 @@ AGENTS_PIPELINE_ENABLED = os.environ.get("AGENTS_PIPELINE_ENABLED", "true").stri
     "true",
     "yes",
 )
+# Staged table selection: keyword shortlist → description confirm → columns → Business rules.
+SELECTION_AGENT_ENABLED = os.environ.get("SELECTION_AGENT_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 ENABLE_STREAMING = os.environ.get("ENABLE_STREAMING", "true").strip().lower() in (
     "1",
     "true",

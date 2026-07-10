@@ -173,6 +173,28 @@ def sql_intent_mismatch_reason(
             ):
                 return "period question requires a date filter in SQL"
 
+    # Raw / CSV / field-wise must not collapse to aggregates.
+    try:
+        from agents.answer_shape import wants_raw_tabular_data
+
+        if wants_raw_tabular_data(q):
+            if re.search(
+                r"SELECT\s+COUNT\s*\(|COUNT\s*\(\s*DISTINCT|unique_responders|response_count",
+                sql_text,
+                re.I,
+            ) and not re.search(r"\bGROUP BY\b.{0,80}\buser_answer\b", sql_text, re.I | re.S):
+                # Scalar or user-count aggregate is wrong for raw export.
+                if re.search(
+                    r"COUNT\s*\(\s*DISTINCT\s+[`\"]?user_id|SELECT\s+COUNT\s*\(\s*\*\s*\)",
+                    sql_text,
+                    re.I,
+                ):
+                    return "raw/CSV/field-wise request must return row-level columns, not aggregates"
+            if re.search(r"SELECT\s+COUNT\s*\(\s*DISTINCT\s+[`\"]?user_id", sql_text, re.I):
+                return "raw/CSV/field-wise request must return row-level columns, not aggregates"
+    except Exception:
+        pass
+
     return None
 
 

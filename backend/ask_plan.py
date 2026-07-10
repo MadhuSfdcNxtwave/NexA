@@ -78,6 +78,9 @@ class AskPlan:
     kb_columns: dict[str, list[str]] = field(default_factory=dict)
     kb_filters: list[str] = field(default_factory=list)
     kb_measure: str = ""
+    answer_mode: str = "auto"  # raw | aggregate | auto
+    rules_block: str = ""
+    clarify: dict | None = None
 
 
 def extract_keywords(question: str) -> list[str]:
@@ -520,12 +523,15 @@ def build_ask_plan(
 
     prior_table_ids = _tables_from_prior_sql(prior_sql, included)
     from question_intent import is_drill_down_data_request
+    from agents.answer_shape import is_thread_continuity_followup, detect_answer_shape
 
     is_followup = (
         question_is_breakdown_followup(question, prior_sql=prior_sql)
         or (bool(prior_sql) and question_wants_breakdown(question))
         or (bool(prior_sql) and is_drill_down_data_request(question))
+        or is_thread_continuity_followup(question, prior_sql=prior_sql)
     )
+    answer_shape = detect_answer_shape(question, prior_sql=prior_sql)
     if prior_table_ids and is_followup:
         prior_set = set(prior_table_ids)
         for m in matches:
@@ -542,6 +548,8 @@ def build_ask_plan(
     kb_measure = ""
     pinned: list[str] = []
     user_pinned = bool(user_table_pins)
+    rules_block = ""
+    clarify_payload = None
 
     # 0. Explicit user control — @mention or pinned_table_ids from API.
     if user_table_pins:
@@ -551,15 +559,51 @@ def build_ask_plan(
             short = ", ".join(f"`{fq.rsplit('.', 1)[-1]}`" for fq in selected_ids)
             route_reason = f"User table pin: {short}"
 
-    # Breakdown / drill-down follow-ups must stay on the prior query's table(s).
+    # Breakdown / drill-down / raw-CSV continuity follow-ups stay on prior table(s).
     if not selected_ids and prior_table_ids and is_followup:
         selected_ids = prior_table_ids[:_MAX_SELECTED]
         short = ", ".join(f"`{fq.rsplit('.', 1)[-1]}`" for fq in selected_ids)
-        kind = "Drill-down" if is_drill_down_data_request(question) else "Breakdown"
+        if is_thread_continuity_followup(question, prior_sql=prior_sql):
+            kind = "Thread continuity"
+        elif is_drill_down_data_request(question):
+            kind = "Drill-down"
+        else:
+            kind = "Breakdown"
         route_reason = f"{kind} follow-up — reusing table(s) from prior query: {short}"
 
+    # Staged selection agent: keyword shortlist → description confirm → columns → rules.
+    if not selected_ids and getattr(config, "SELECTION_AGENT_ENABLED", True):
+        try:
+            from agents.selection_agent import run_selection_agent
+
+            sel = run_selection_agent(
+                question,
+                included,
+                matches,
+                knowledges,
+                prior_sql=prior_sql,
+                user_table_pins=user_table_pins,
+            )
+            if sel and sel.clarify:
+                clarify_payload = sel.clarify
+            if sel and sel.answer_shape:
+                answer_shape = sel.answer_shape
+            if sel and sel.selected_full_ids:
+                selected_ids = sel.selected_full_ids[:_MAX_SELECTED]
+                route_reason = sel.route_reason or route_reason
+                if sel.kb_columns:
+                    kb_columns = sel.kb_columns
+                if sel.kb_filters:
+                    kb_filters = sel.kb_filters
+                if sel.kb_measure:
+                    kb_measure = sel.kb_measure
+                if sel.rules_block:
+                    rules_block = sel.rules_block
+        except Exception as exc:
+            print(f"[ask_plan] selection agent skipped: {exc}")
+
     # Compound multi-domain → both tables + join (skip single-table domain pin).
-    elif compound:
+    if not selected_ids and compound:
         compound_ids = compound_domain_table_ids(question, included)
         if compound_ids:
             selected_ids = compound_ids[: max(_MAX_SELECTED, len(compound_ids))]
@@ -673,6 +717,15 @@ def build_ask_plan(
         compact = compact[:42].rstrip() + "…"
     sql_label = f'Creating "{compact}" sql cell…'
 
+    if not rules_block and selected_ids:
+        try:
+            from table_business_rules import build_mandatory_rules_preamble
+
+            sel_tables = [t for t in included if t.full_table_id in selected_ids]
+            rules_block = build_mandatory_rules_preamble(sel_tables)
+        except Exception:
+            rules_block = ""
+
     return AskPlan(
         keywords=keywords,
         status_message=status,
@@ -686,4 +739,7 @@ def build_ask_plan(
         kb_columns=kb_columns,
         kb_filters=kb_filters,
         kb_measure=kb_measure,
+        answer_mode=getattr(answer_shape, "mode", "auto") or "auto",
+        rules_block=rules_block,
+        clarify=clarify_payload,
     )

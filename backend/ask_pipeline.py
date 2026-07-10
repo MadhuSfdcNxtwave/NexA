@@ -1800,9 +1800,15 @@ def iter_ask(
         routing_reason=plan.routing_reason or plan.reasoning[:200],
         selected=[m.short_name for m in plan.tables if m.selected],
         top_scores=[(m.short_name, m.score) for m in plan.tables[:5]],
+        answer_mode=getattr(plan, "answer_mode", "auto"),
     )
     yield {"type": "status", "message": plan.status_message}
     yield _plan_event(plan)
+
+    # Selection agent asked which feedback table — stop before SQL.
+    if getattr(plan, "clarify", None) and not has_clarification and config.ASK_CLARIFICATION_ENABLED:
+        yield {"type": "awaiting_clarification", **plan.clarify}
+        return
 
     if plan.join_relations:
         yield {
@@ -2035,6 +2041,15 @@ def iter_ask(
     # Compact schema body, then put selected-table rules at the TOP (never truncated).
     schema_text = _compact_schema_text(schema_text, num_tables=len(selected))
     schema_text = prepend_rules_to_schema(schema_text, selected)
+    # Planner answer-mode + rules checkpoints for SQL generation.
+    if getattr(plan, "rules_block", "") and "MANDATORY" not in (schema_text[:500] or ""):
+        schema_text = (plan.rules_block + "\n\n" + schema_text).strip()
+    if getattr(plan, "answer_mode", "") == "raw":
+        schema_text = (
+            "# ANSWER SHAPE CHECKPOINT: User wants RAW / field-wise / CSV-ready rows.\n"
+            "# Do NOT use COUNT/COUNT DISTINCT aggregates. SELECT row-level columns.\n\n"
+            + schema_text
+        )
     model_used = sql_model_for_question(question) if agents_enabled() else config.FETCH_MODEL
 
     routing_meta = _routing_meta(plan=plan, selected=selected)
@@ -2251,6 +2266,39 @@ def iter_ask(
                                 )
                             except ValueError:
                                 template_sql = None
+
+                # Raw / CSV / field-wise contextual feedback — before aggregate templates.
+                if not template_sql:
+                    try:
+                        from agents.answer_shape import wants_raw_tabular_data
+                        from feedback_sql import try_build_feedback_sql
+
+                        if getattr(plan, "answer_mode", "") == "raw" or wants_raw_tabular_data(
+                            question
+                        ):
+                            raw_sql = try_build_feedback_sql(
+                                question,
+                                selected,
+                                columns_by_table,
+                                relaxed=True,
+                            )
+                            if raw_sql and "GROUP BY" not in raw_sql.upper():
+                                template_sql = raw_sql
+                                semantic_reason = "Raw feedback export SQL"
+                                sql_source = "feedback_raw"
+                                ask_trace(
+                                    "feedback_raw_sql",
+                                    question=question[:200],
+                                    hit=True,
+                                    sql_preview=(template_sql or "")[:300],
+                                )
+                    except Exception as exc:
+                        ask_trace(
+                            "feedback_raw_sql",
+                            question=question[:200],
+                            hit=False,
+                            error=str(exc)[:120],
+                        )
 
                 # NPS templates first — planner often wrongly picks unique_responders.
                 if not template_sql:

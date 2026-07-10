@@ -437,12 +437,83 @@ def try_build_feedback_sql(
     if not relaxed and not is_feedback_table_question(q) and not is_survey_answer_question(q):
         return None
 
+    # Raw / CSV / field-wise → row-level SELECT, never GROUP BY aggregates.
+    try:
+        from agents.answer_shape import wants_raw_tabular_data
+
+        if wants_raw_tabular_data(q):
+            return _build_raw_export_sql(fq, cols, q)
+    except Exception:
+        pass
+
     terms = _terms(q)
     if is_survey_answer_question(q) or _GROUP_INTENT.search(q) or is_feedback_table_question(q):
         return _build_group_sql(fq, cols, q, terms=terms)
     if relaxed and terms:
         return _build_group_sql(fq, cols, q, terms=terms, min_score=1)
     return None
+
+
+def _build_raw_export_sql(fq: str, cols: set[str], question: str) -> str:
+    """Field-wise rows for CSV export — current month when asked."""
+    preferred = [
+        "user_id",
+        "feedback_id",
+        "feedback_trigger",
+        "question_id",
+        "question_order",
+        "question_type",
+        "question_text",
+        "user_answer",
+        "emoji_rating",
+        "submitted_date",
+        "enroll_plans_str",
+        "is_valid_question",
+        "is_valid_trigger",
+    ]
+    select_cols = [c for c in preferred if c in cols]
+    if not select_cols:
+        # Fall back to a safe subset of known names present on the table.
+        select_cols = sorted(c for c in cols if c in preferred or c.endswith("_id") or "text" in c or "answer" in c)[:16]
+    if not select_cols:
+        select_cols = ["*"]
+
+    where_parts: list[str] = []
+    if "is_valid_question" in cols:
+        where_parts.append("is_valid_question IS TRUE")
+    if "is_valid_trigger" in cols:
+        where_parts.append("is_valid_trigger IS TRUE")
+
+    date_col = "submitted_date" if "submitted_date" in cols else None
+    if date_col and re.search(r"\b(this|current)\s+month\b|\bmtd\b", question or "", re.I):
+        where_parts.append(
+            f"DATE(`{date_col}`) BETWEEN DATE_TRUNC(CURRENT_DATE(), MONTH) "
+            f"AND LAST_DAY(CURRENT_DATE(), MONTH)"
+        )
+    elif date_col:
+        # Still prefer recent data for unbounded "details" dumps.
+        try:
+            from question_dates import resolve_relative_range
+
+            rng = resolve_relative_range(question or "")
+            if rng:
+                start, end = rng
+                where_parts.append(
+                    f"DATE(`{date_col}`) BETWEEN DATE('{start.isoformat()}') AND DATE('{end.isoformat()}')"
+                )
+        except Exception:
+            pass
+
+    where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
+    cols_sql = ", ".join(f"`{c}`" for c in select_cols) if select_cols != ["*"] else "*"
+    order = f"ORDER BY `{date_col}` DESC" if date_col else ""
+    return f"""
+SELECT {cols_sql}
+FROM `{fq}`
+WHERE {where_sql}
+{order}
+LIMIT 5000
+""".strip()
 
 
 def try_build_fallback_feedback_sql(

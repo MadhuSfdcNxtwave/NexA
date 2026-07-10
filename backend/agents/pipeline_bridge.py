@@ -96,7 +96,14 @@ def critic_validate_and_fix(
     """Run QueryCritic when enabled; skip deterministic template sources."""
     if not agents_enabled():
         return sql, []
-    skip = skip_for_sources or {"template", "domain", "join_template", "user"}
+    skip = skip_for_sources or {
+        "template",
+        "domain",
+        "join_template",
+        "user",
+        "feedback_raw",
+        "nps_template",
+    }
     if sql_source in skip:
         return sql, []
     return get_query_critic().validate_and_correct(
