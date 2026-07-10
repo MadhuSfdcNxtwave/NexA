@@ -54,9 +54,10 @@ class DrillDownContinuityTests(unittest.TestCase):
         )
         out = rewrite_aggregate_to_user_list_sql(prior)
         self.assertIsNotNone(out)
-        self.assertIn("SELECT DISTINCT `user_id`", out)
+        self.assertIn("`user_id`", out)
+        self.assertIn("user_id_with_hyphens", out)
         self.assertIn("BETWEEN '2026-07-01' AND '2026-07-09'", out)
-        self.assertNotIn("COUNT", out)
+        self.assertNotIn("COUNT(", out.upper())
         self.assertIn("LIMIT 500 OFFSET 0", out)
 
     def test_continuity_locks_prior_table(self):
@@ -111,6 +112,7 @@ class DrillDownContinuityTests(unittest.TestCase):
             "REPLACE(s.`user_id`, '-', '') = REPLACE(p.`user_id`, '-', '')",
             out,
         )
+        self.assertIn("user_id_with_hyphens", out)
 
     def test_id_list_followup_chips(self):
         from presentation import suggest_id_list_followups

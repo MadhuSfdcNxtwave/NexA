@@ -517,6 +517,32 @@ def resolve_user_name_source(
     return fq, sorted(names), on_sql
 
 
+def _user_id_hyphen_expr(source_sql: str, *, prefer_sql: str | None = None) -> str:
+    """BigQuery expr: UUID with hyphens (8-4-4-4-12) from a user_id value.
+
+    Some tables store user_id without hyphens; profile/master often store WITH hyphens.
+    When prefer_sql is set (e.g. p.`user_id`), use it when present.
+    """
+    src = source_sql.strip()
+    stripped = f"REPLACE(CAST({src} AS STRING), '-', '')"
+    formatted = (
+        f"IF(\n"
+        f"    REGEXP_CONTAINS({stripped}, r'^[0-9a-fA-F]{{32}}$'),\n"
+        f"    CONCAT(\n"
+        f"      SUBSTR({stripped}, 1, 8), '-',\n"
+        f"      SUBSTR({stripped}, 9, 4), '-',\n"
+        f"      SUBSTR({stripped}, 13, 4), '-',\n"
+        f"      SUBSTR({stripped}, 17, 4), '-',\n"
+        f"      SUBSTR({stripped}, 21, 12)\n"
+        f"    ),\n"
+        f"    CAST({src} AS STRING)\n"
+        f"  )"
+    )
+    if prefer_sql:
+        return f"COALESCE(NULLIF(CAST({prefer_sql} AS STRING), ''), {formatted})"
+    return formatted
+
+
 def apply_list_pagination(sql: str, *, page: int = 1, page_size: int | None = None) -> str:
     """Replace/add ORDER BY + LIMIT/OFFSET on a list SELECT."""
     text = (sql or "").strip().rstrip(";")
@@ -558,7 +584,10 @@ def _wrap_user_list_with_names(
     page = max(1, int(page or 1))
     offset = (page - 1) * size
 
-    select_bits = ["s.`user_id`"]
+    select_bits = [
+        "s.`user_id` AS `user_id`",
+        f"{_user_id_hyphen_expr('s.`user_id`', prefer_sql='p.`user_id`')} AS `user_id_with_hyphens`",
+    ]
     cols_l = [c.lower() for c in name_columns]
     if "first_name" in cols_l and "last_name" in cols_l:
         fn = next(c for c in name_columns if c.lower() == "first_name")
@@ -582,6 +611,24 @@ def _wrap_user_list_with_names(
         f"ORDER BY s.`user_id`\n"
         f"LIMIT {size} OFFSET {offset}"
     )
+
+
+def _enrich_user_list_with_hyphen_column(sql: str) -> str:
+    """Add user_id_with_hyphens next to a plain SELECT DISTINCT user_id list."""
+    text = (sql or "").strip().rstrip(";")
+    if not text:
+        return text
+    if re.search(r"[`\"]?user_id_with_hyphens[`\"]?", text, re.I):
+        return text
+    # Only rewrite simple user_id-only lists
+    m = re.match(
+        r"(?is)^\s*SELECT\s+DISTINCT\s+(`?user_id`?)\s+(FROM\b[\s\S]+)$",
+        text,
+    )
+    if not m:
+        return text
+    hyphen = _user_id_hyphen_expr("`user_id`")
+    return f"SELECT DISTINCT\n  `user_id`,\n  {hyphen} AS `user_id_with_hyphens`\n{m.group(2).strip()}"
 
 
 def expand_drill_down_followup(
@@ -667,7 +714,7 @@ def rewrite_aggregate_to_user_list_sql(
     if is_user_id_list_sql(sql):
         base = apply_list_pagination(sql, page=page, page_size=size)
         if not wants_names:
-            return base
+            return _enrich_user_list_with_hyphen_column(base)
         if re.search(r"[`\"]?(user_name|first_name|last_name)[`\"]?", base, re.I):
             return base
         # Strip pagination, wrap with names, re-apply page
@@ -697,7 +744,7 @@ def rewrite_aggregate_to_user_list_sql(
                     page=page,
                     page_size=size,
                 )
-        return base
+        return _enrich_user_list_with_hyphen_column(base)
 
     # Must be a count aggregate (user_id / * / 1) — not already a list
     is_count = bool(
@@ -729,7 +776,7 @@ def rewrite_aggregate_to_user_list_sql(
     )
 
     if not wants_names:
-        return base
+        return _enrich_user_list_with_hyphen_column(base)
 
     fact_fq = ""
     m_fq = re.search(r"FROM\s+`([^`]+)`", tail, re.I)

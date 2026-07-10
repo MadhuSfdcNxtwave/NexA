@@ -92,10 +92,11 @@ class DrillDownFollowupTests(unittest.TestCase):
         out = rewrite_aggregate_to_user_list_sql(prior_sql)
         self.assertIsNotNone(out)
         assert out is not None
-        self.assertIn("SELECT DISTINCT `user_id`", out)
+        self.assertIn("`user_id`", out)
+        self.assertIn("user_id_with_hyphens", out)
         self.assertIn("attendance_status", out)
         self.assertIn("slot_date", out)
-        self.assertNotIn("COUNT", out.upper())
+        self.assertNotIn("COUNT(", out.upper())
         self.assertIn("LIMIT 500 OFFSET 0", out)
 
     def test_paginate_existing_list_sql(self):
