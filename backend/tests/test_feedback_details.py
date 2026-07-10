@@ -47,6 +47,26 @@ class ContextualFeedbackDetailsTests(unittest.TestCase):
         self.assertLess(low.index("feedback_about"), low.index("user_id"))
         self.assertLess(low.index("feedback_answer"), low.index("feedback_id"))
 
+    def test_domain_sql_does_not_count_for_details(self) -> None:
+        from domain_sql import resolve_domain_sql
+        from types import SimpleNamespace
+
+        fq = "proj.ds.users_contextual_feedback_details"
+        table = SimpleNamespace(
+            full_table_id=fq,
+            column_descriptions_json="",
+        )
+        out = resolve_domain_sql(
+            "Give me the current month's contextual feedback details",
+            [table],
+        )
+        self.assertIsNotNone(out)
+        sql, _t, reason = out
+        self.assertNotIn("COUNT(", sql.upper())
+        self.assertIn("when_submitted", sql.lower())
+        self.assertIn("feedback_answer", sql.lower())
+        self.assertIn("details", reason.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

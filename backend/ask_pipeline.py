@@ -2231,7 +2231,37 @@ def iter_ask(
                         domain_resolved = None
 
         if not domain_resolved and not config.HEX_STYLE_PIPELINE:
-            domain_resolved = resolve_domain_sql(question, included_tables)
+            # Prefer row-level feedback details over domain COUNT(unique_users).
+            try:
+                from agents.answer_shape import wants_raw_tabular_data
+                from feedback_sql import try_build_feedback_sql
+
+                if wants_raw_tabular_data(original_question) or wants_raw_tabular_data(question):
+                    raw_sql = try_build_feedback_sql(
+                        original_question or question,
+                        selected or included_tables,
+                        columns_by_table,
+                        relaxed=True,
+                    )
+                    if raw_sql and "COUNT(" not in raw_sql.upper():
+                        fb_table = next(
+                            (
+                                t
+                                for t in (selected or included_tables or [])
+                                if "contextual_feedback" in (t.full_table_id or "").lower()
+                            ),
+                            (selected or included_tables or [None])[0],
+                        )
+                        if fb_table is not None:
+                            domain_resolved = (
+                                raw_sql,
+                                fb_table,
+                                "Feedback details (row-level)",
+                            )
+            except Exception:
+                pass
+            if not domain_resolved:
+                domain_resolved = resolve_domain_sql(question, included_tables)
 
         if config.HEX_STYLE_PIPELINE and not domain_resolved:
             from notebook_planner import plan_notebook_steps
@@ -2512,11 +2542,11 @@ def iter_ask(
                         ):
                             raw_sql = try_build_feedback_sql(
                                 question,
-                                selected,
+                                selected or included_tables,
                                 columns_by_table,
                                 relaxed=True,
                             )
-                            if raw_sql and "GROUP BY" not in raw_sql.upper():
+                            if raw_sql and "GROUP BY" not in raw_sql.upper() and "COUNT(" not in raw_sql.upper():
                                 template_sql = raw_sql
                                 semantic_reason = (
                                     "Contextual feedback details — when submitted, "
@@ -2535,6 +2565,21 @@ def iter_ask(
                                     query_ctx.presentation_hints = hints
                                 except Exception:
                                     pass
+                                # Ensure feedback table is selected for validation.
+                                fb = next(
+                                    (
+                                        t
+                                        for t in (included_tables or selected or [])
+                                        if "contextual_feedback" in (t.full_table_id or "").lower()
+                                    ),
+                                    None,
+                                )
+                                if fb and fb.full_table_id not in {
+                                    t.full_table_id for t in selected
+                                }:
+                                    selected = [fb] + list(selected)
+                                    hints_map = _column_hints_map(selected)
+                                    inferred, columns_by_table = _infer_hints_for_tables(selected)
                                 ask_trace(
                                     "feedback_raw_sql",
                                     question=question[:200],
