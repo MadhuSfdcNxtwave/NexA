@@ -86,7 +86,16 @@ VIZ_FALLBACK_MODELS = [
 ]
 
 # --- App -------------------------------------------------------------------
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./hexlite.db")
+# Pin SQLite to backend/ so create-user and login always hit the same file
+# regardless of the shell's working directory when uvicorn starts.
+_DEFAULT_SQLITE = "sqlite:///" + str(
+    (Path(__file__).resolve().parent / "hexlite.db").as_posix()
+)
+_raw_db = os.environ.get("DATABASE_URL", "").strip()
+if not _raw_db or _raw_db in ("sqlite:///./hexlite.db", "sqlite:///hexlite.db"):
+    DATABASE_URL = _DEFAULT_SQLITE
+else:
+    DATABASE_URL = _raw_db
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 
 # How many past Q&A entries to feed back into a new question as memory.

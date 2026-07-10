@@ -1,5 +1,7 @@
-"""BigQuery access. Schema is built per-project from that project's
-configured table list, so each workspace only ever sees its own tables.
+"""BigQuery helpers for NexA.
+
+Queries run against the workspace catalog / configured table list, so each
+workspace only ever sees its own tables.
 
 Security: the real guard is the service account's read-only IAM role. The
 SELECT-only check here is a secondary net.

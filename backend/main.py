@@ -224,10 +224,18 @@ def setup_status():
 def login(body: schemas.LoginRequest, db: Session = Depends(get_db)):
     email = body.email.strip().lower()
     user = db.scalar(select(User).where(User.email == email))
-    if not user or not verify_password(body.password, user.password_hash):
-        raise HTTPException(401, "Invalid email or password")
+    if not user:
+        raise HTTPException(
+            401,
+            "No account for that email. Check spelling, or ask an admin to create/reset your user.",
+        )
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(
+            401,
+            "Wrong password. Ask an admin to use Reset password on the Admin page.",
+        )
     if not user.is_active:
-        raise HTTPException(403, "Account disabled")
+        raise HTTPException(403, "Account disabled — ask an admin to reactivate it.")
     token = create_access_token(user)
     return schemas.LoginResponse(token=token, user=user)
 
