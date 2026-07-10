@@ -76,6 +76,8 @@ services:
         value: "false"
       - key: SYNC_WORKSPACE_FROM_DATASET
         value: "0"
+      - key: SYNC_WORKSPACE_FROM_YAML
+        value: "1"
 
   # ---- Frontend (static React build) ----
   - type: web

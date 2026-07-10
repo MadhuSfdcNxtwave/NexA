@@ -932,7 +932,16 @@ export default function DataBrowserPage() {
 
             {(browserTab === "models" || (canEdit && browserTab === "recommended")) && (
               <div className="data-object-section">
-                <div className="data-object-label">WORKSPACE TABLES</div>
+                <div className="data-object-label">
+                  WORKSPACE TABLES
+                  {projectTables.length > 0 && (
+                    <span className="data-object-count">
+                      {filteredProjectTables.length === projectTables.length
+                        ? ` (${projectTables.length})`
+                        : ` (${filteredProjectTables.length}/${projectTables.length})`}
+                    </span>
+                  )}
+                </div>
                 {filteredProjectTables.length === 0 && (
                   <div className="data-object-empty muted">
                     {canEdit

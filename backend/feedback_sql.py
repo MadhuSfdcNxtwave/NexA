@@ -455,39 +455,55 @@ def try_build_feedback_sql(
 
 
 def _build_raw_export_sql(fq: str, cols: set[str], question: str) -> str:
-    """Field-wise rows for CSV export — current month when asked."""
-    preferred = [
-        "user_id",
-        "feedback_id",
-        "feedback_trigger",
-        "feedback_type",
-        "question_id",
-        "question_order",
-        "question_type",
-        "question_text",
-        "user_answer",
-        "emoji_rating",
-        "submitted_date",
-        "enroll_plans_str",
-        "is_valid_question",
-        "is_valid_trigger",
+    """Row-level contextual feedback: what / when / about what (plus who).
+
+    Users asking for «feedback details» expect:
+      - when it was given (submitted_date)
+      - what it was about (feedback_trigger / type)
+      - what was asked (question_text)
+      - what they answered (user_answer)
+      - who (user_id)
+    """
+    # (source_col, alias) — alias None keeps the column name.
+    # Order is intentional: when → about → question → answer → who → ids.
+    preferred: list[tuple[str, str | None]] = [
+        ("submitted_date", "when_submitted"),
+        ("feedback_trigger", "feedback_about"),
+        ("feedback_type", "feedback_type"),
+        ("question_text", "question"),
+        ("user_answer", "feedback_answer"),
+        ("emoji_rating", "emoji_rating"),
+        ("question_type", "question_type"),
+        ("question_order", "question_order"),
+        ("user_id", "user_id"),
+        ("feedback_id", "feedback_id"),
+        ("question_id", "question_id"),
+        ("enroll_plans_str", "enroll_plans"),
     ]
-    # Only select columns that actually exist on the table.
-    select_cols = [c for c in preferred if c in cols]
-    if not select_cols:
-        select_cols = sorted(
+    select_bits: list[str] = []
+    used: set[str] = set()
+    for col, alias in preferred:
+        if col not in cols or col in used:
+            continue
+        used.add(col)
+        if alias and alias != col:
+            select_bits.append(f"`{col}` AS `{alias}`")
+        else:
+            select_bits.append(f"`{col}`")
+
+    if not select_bits:
+        fallback = sorted(
             c
             for c in cols
-            if c in preferred or c.endswith("_id") or "text" in c or "answer" in c or "trigger" in c
+            if c.endswith("_id") or "text" in c or "answer" in c or "trigger" in c or "date" in c
         )[:16]
-    if not select_cols:
-        select_cols = ["*"]
+        select_bits = [f"`{c}`" for c in fallback] if fallback else ["*"]
 
     where_parts: list[str] = []
     if "is_valid_question" in cols:
-        where_parts.append("is_valid_question IS TRUE")
+        where_parts.append("`is_valid_question` IS TRUE")
     if "is_valid_trigger" in cols:
-        where_parts.append("is_valid_trigger IS TRUE")
+        where_parts.append("`is_valid_trigger` IS TRUE")
 
     date_col = "submitted_date" if "submitted_date" in cols else None
     if date_col and re.search(r"\b(this|current)\s+month\b|\bmtd\b", question or "", re.I):
@@ -509,8 +525,10 @@ def _build_raw_export_sql(fq: str, cols: set[str], question: str) -> str:
             pass
 
     where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
-    cols_sql = ", ".join(f"`{c}`" for c in select_cols) if select_cols != ["*"] else "*"
-    order = f"ORDER BY `{date_col}` DESC" if date_col else ""
+    cols_sql = ", ".join(select_bits) if select_bits != ["*"] else "*"
+    order = "ORDER BY `when_submitted` DESC" if date_col else ""
+    if date_col and "when_submitted" not in cols_sql:
+        order = f"ORDER BY `{date_col}` DESC"
     return f"""
 SELECT {cols_sql}
 FROM `{fq}`

@@ -23,10 +23,12 @@ _RAW_EXPORT = re.compile(
 _DETAILS_LIST = re.compile(
     r"\b("
     r"(?:give|show|get|list|fetch|provide|return|pull)\s+"
-    r"(?:me\s+)?(?:the\s+)?(?:current\s+month\s+|this\s+month\s+)?"
+    r"(?:me\s+)?(?:the\s+)?"
+    r"(?:(?:current|this)\s+months?'?\s+)?"
     r"(?:contextual\s+)?feedback\s+details?"
     r"|feedback\s+details?"
     r"|detailed\s+(?:records?|rows?|data)"
+    r"|(?:current|this)\s+months?'?\s+(?:contextual\s+)?feedback"
     r")\b",
     re.I,
 )

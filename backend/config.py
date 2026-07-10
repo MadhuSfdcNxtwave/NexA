@@ -29,12 +29,21 @@ _DEFAULT_WS_TABLES = ",".join([
     f"{_DATASET}.z_academy_placement_eligibility_user_wise_stage_wise_best_attempts",
     f"{_DATASET}.feedback_successcoach_support",
     f"{_DATASET}.z_ccbp_users_cloudwatch_interactions_with_nav_bar",
+    # Live class / attendance — required for attendance Ask threads
+    f"{_DATASET}.z_academy_users_live_classes_attendance_and_time_spent_details",
+    f"{_DATASET}.z_academy_users_live_classes_recordings_watched_details",
+    f"{_DATASET}.live_classes_user_feedback_responses",
+    f"{_DATASET}.academy_users_day_and_page_wise_time_spent_details",
 ])
 DEFAULT_WORKSPACE_TABLES = os.environ.get("DEFAULT_WORKSPACE_TABLES", _DEFAULT_WS_TABLES).strip()
 # On startup, add every BigQuery table in BQ_DEFAULT_DATASET that is not yet in the catalog.
 # Default OFF — catalog should match workspace_models.yaml (~55 tables), not the full BQ dataset.
 SYNC_WORKSPACE_FROM_DATASET = os.environ.get(
     "SYNC_WORKSPACE_FROM_DATASET", "0"
+).strip().lower() in ("1", "true", "yes")
+# On startup, ensure every table in workspace_models.yaml exists in the catalog.
+SYNC_WORKSPACE_FROM_YAML = os.environ.get(
+    "SYNC_WORKSPACE_FROM_YAML", "1"
 ).strip().lower() in ("1", "true", "yes")
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")  # Vertex region
 MAX_BYTES_BILLED = int(os.environ.get("MAX_BYTES_BILLED", 2 * 1024**3))  # 2 GB cap/query (Ask)

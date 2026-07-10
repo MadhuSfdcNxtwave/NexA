@@ -664,6 +664,72 @@ def _sync_workspace_from_default_dataset() -> None:
         db.close()
 
 
+def _sync_workspace_from_yaml_models() -> None:
+    """Ensure every table in workspace_models.yaml exists in the workspace catalog.
+
+    Fresh deploys previously only got DEFAULT_WORKSPACE_TABLES (~13). YAML has ~55
+    models — without this sync, Ask cannot see attendance / master / placements etc.
+    Lightweight: adds missing table rows only (no BQ profiling / AI overviews).
+    """
+    import config
+    from pathlib import Path
+    from sqlalchemy import select
+
+    if not getattr(config, "SYNC_WORKSPACE_FROM_YAML", True):
+        return
+
+    yaml_path = Path(__file__).resolve().parent / "workspace_models.yaml"
+    if not yaml_path.is_file():
+        print(f"[workspace-yaml-sync] missing {yaml_path}")
+        return
+
+    try:
+        import model_yaml
+
+        models = model_yaml.parse_yaml_documents(yaml_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[workspace-yaml-sync] could not parse YAML: {e}")
+        return
+
+    ids: list[str] = []
+    seen: set[str] = set()
+    for model in models:
+        fq = (model.get("full_table_id") or "").strip()
+        if not fq or fq in seen:
+            continue
+        seen.add(fq)
+        ids.append(fq)
+    if not ids:
+        return
+
+    db = SessionLocal()
+    try:
+        existing = {t.full_table_id for t in db.scalars(select(WorkspaceTable)).all()}
+        added = 0
+        for fq in ids:
+            if fq in existing:
+                continue
+            desc = ""
+            for model in models:
+                if model.get("full_table_id") == fq:
+                    desc = (model.get("description") or "")[:2000]
+                    break
+            db.add(
+                WorkspaceTable(
+                    full_table_id=fq,
+                    description=desc,
+                    included_for_ai=True,
+                )
+            )
+            existing.add(fq)
+            added += 1
+        if added:
+            db.commit()
+            print(f"[workspace-yaml-sync] added {added} tables from workspace_models.yaml")
+    finally:
+        db.close()
+
+
 def _migrate_threads() -> None:
     """Add memories.thread_id and backfill a default thread per project."""
     from sqlalchemy import inspect, text
@@ -853,6 +919,7 @@ def init_db() -> None:
     _migrate_workspace_settings()
     _migrate_learned_templates()
     _sync_default_workspace_tables()
+    _sync_workspace_from_yaml_models()
     _sync_workspace_from_default_dataset()
     from auth import bootstrap_admin
 

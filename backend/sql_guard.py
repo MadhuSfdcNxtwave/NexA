@@ -76,6 +76,31 @@ def validate_sql(
     issues: list[str] = []
 
     allowed_tables = {t.full_table_id for t in selected_tables}
+    # Name enrichment JOINs (profile) are allowed alongside the locked fact table.
+    try:
+        from question_intent import is_name_enrichment_table
+
+        sql_tables = _tables_in_sql(sql)
+        for ref in sql_tables:
+            if not is_name_enrichment_table(ref):
+                continue
+            matched = False
+            if columns_by_table:
+                for fq in columns_by_table:
+                    if fq.rsplit(".", 1)[-1].lower() == ref.rsplit(".", 1)[-1].lower():
+                        allowed_tables.add(fq)
+                        matched = True
+                        break
+            if not matched:
+                allowed_tables.add(ref)
+        if columns_by_table:
+            for fq in columns_by_table:
+                if is_name_enrichment_table(fq):
+                    allowed_tables.add(fq)
+    except Exception:
+        pass
+
+    schema_checked = False
     if columns_by_table is not None or allowed_columns is not None:
         issues.extend(
             sql_parse.validate_against_schema(
@@ -85,6 +110,7 @@ def validate_sql(
                 columns_by_table=columns_by_table,
             )
         )
+        schema_checked = True
         catalog = {t.full_table_id.rsplit(".", 1)[-1].lower(): t.full_table_id for t in selected_tables}
         for short, fq in catalog.items():
             wrong = re.compile(
@@ -104,7 +130,8 @@ def validate_sql(
         except ValueError as e:
             issues.append(str(e))
 
-    if allowed_columns is None:
+    # Avoid duplicating the same "must use one of these tables" message.
+    if allowed_columns is None and not schema_checked:
         short_names = {t.full_table_id.rsplit(".", 1)[-1].lower() for t in selected_tables}
         tables = _tables_in_sql(sql)
         blob = _sql_blob(sql)

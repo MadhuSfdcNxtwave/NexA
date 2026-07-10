@@ -59,6 +59,12 @@ def _relation_hint_lines(model_id: str, relations: Any) -> list[str]:
         rel_type = rel.get("type") or "related"
         join_sql = (rel.get("join_sql") or "").strip()
         if rel_id and join_sql:
+            try:
+                from sql_parse import normalize_user_id_joins
+
+                join_sql = normalize_user_id_joins(join_sql)
+            except Exception:
+                pass
             lines.append(f"- {model_id} -> {rel_id} ({rel_type}): {join_sql}")
     return lines
 

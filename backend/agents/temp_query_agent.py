@@ -225,6 +225,20 @@ def run_temp_query_agent(
             question=question,
             included_tables=tables,
             columns_by_table=columns_by_table,
+            force_fact_fq=(
+                next(
+                    (
+                        t.full_table_id
+                        for t in (tables or [])
+                        if t
+                        and "profile_basic" not in (t.full_table_id or "").lower()
+                        and "profile_education" not in (t.full_table_id or "").lower()
+                    ),
+                    None,
+                )
+                if tables
+                else None
+            ),
         )
         if sql:
             return AgentResult(sql=sql, reason=plan.reason, plan=plan, source="temp_agent_drill")

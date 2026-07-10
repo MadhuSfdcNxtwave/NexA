@@ -8711,8 +8711,7 @@ relations:
 "
 academy_nbfc_renewals_conversion_details	"id: academy_nbfc_renewals_conversion_details
 type: model
-base_sql_table: ""`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`aca\
-  demy_nbfc_renewals_conversion_details`""
+base_sql_table: ""`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`academy_nbfc_renewals_conversion_details`""
 measures:
   - id: count_of_records
     func: count
@@ -8790,4 +8789,4 @@ relations:
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${month} = DATE_TRUNC(${y_academy_user_daily_engagement_time_spent.calendar_date}, MONTH)
   - id: academy_nps_form_responses
     type: one_to_one
-    join_sql: ${user_id} = ${academy_nps_form_responses.user_id} AND ${month} = ${academy_nps_form_responses.form_submission_month}"  ADD ALL TABLES
+    join_sql: ${user_id} = ${academy_nps_form_responses.user_id} AND ${month} = ${academy_nps_form_responses.form_submission_month}"

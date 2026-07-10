@@ -21,8 +21,10 @@ _WRITE_TYPES = (
     exp.Merge,
 )
 
+# Insert a space before major clauses when the LLM glues them (e.g. `tWHERE`, `)FROM`).
+# Do NOT split identifiers like `question_order` / `user_limit` (underscore before the keyword).
 _GLUE_BEFORE_KW = re.compile(
-    r"([a-zA-Z0-9_\)])(?=(FROM|WHERE|JOIN|GROUP|ORDER|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b)",
+    r"(?<=[a-zA-Z0-9\)])(?<!_)(?=(?:FROM|WHERE|JOIN|GROUP|ORDER|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b)",
     re.IGNORECASE,
 )
 
@@ -113,7 +115,7 @@ def normalize_llm_sql(sql: str) -> str:
     text = strip_sql_line_comments((sql or "").strip())
     if not text:
         return text
-    text = _GLUE_BEFORE_KW.sub(r"\1 ", text)
+    text = _GLUE_BEFORE_KW.sub(" ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -464,8 +466,73 @@ def fix_canonical_table_paths(sql: str, short_to_fq: dict[str, str]) -> str:
     return out
 
 
+# user_id formats differ across tables (UUID with/without hyphens).
+_UID_COL = r"(?:user_id|discussion_user_id|meet_host_user_id|uid__c)"
+_UID_REF = rf"(?:`?[A-Za-z_][\w]*`?\.)?`?(?:{_UID_COL})`?"
+_UID_REPL = rf"REPLACE\s*\(\s*{_UID_REF}\s*,\s*['\"]-['\"]\s*,\s*['\"]['\"]\s*\)"
+_UID_SIDE = rf"(?:{_UID_REPL}|{_UID_REF})"
+_UID_EQ = re.compile(rf"({_UID_SIDE})\s*=\s*({_UID_SIDE})", re.I)
+
+# Hex-style join hints: ${user_id} / ${table.user_id}
+_HEX_UID = r"\$\{(?:[\w.]+\.)?(?:user_id|discussion_user_id|meet_host_user_id|uid__c)\}"
+_HEX_REPL = rf"REPLACE\s*\(\s*{_HEX_UID}\s*,\s*['\"]-['\"]\s*,\s*['\"]['\"]\s*\)"
+_HEX_SIDE = rf"(?:{_HEX_REPL}|{_HEX_UID})"
+_HEX_EQ = re.compile(rf"({_HEX_SIDE})\s*=\s*({_HEX_SIDE})", re.I)
+
+
+def _unwrap_uid_replace(expr: str) -> str:
+    text = (expr or "").strip()
+    m = re.match(
+        rf"REPLACE\s*\(\s*({_UID_REF}|{_HEX_UID})\s*,\s*['\"]-['\"]\s*,\s*['\"]['\"]\s*\)\s*$",
+        text,
+        re.I,
+    )
+    return m.group(1).strip() if m else text
+
+
+def _wrap_uid_replace(expr: str) -> str:
+    inner = _unwrap_uid_replace(expr)
+    return f"REPLACE({inner}, '-', '')"
+
+
+def normalize_user_id_joins(sql: str) -> str:
+    """Force both-side REPLACE on user_id equalities (hyphen formats differ).
+
+    Basic rule for every table:
+      REPLACE(a.user_id, '-', '') = REPLACE(b.user_id, '-', '')
+    """
+    text = sql or ""
+    if not text:
+        return text
+
+    # Repair corrupted TSV quotes: REPLACE(x, "-", ") → REPLACE(x, '-', '')
+    text = re.sub(
+        r"""REPLACE\s*\(\s*([^,()]+?)\s*,\s*["']-["']?\s*,\s*["']?\s*\)""",
+        r"REPLACE(\1, '-', '')",
+        text,
+        flags=re.I,
+    )
+
+    def _rewriter(pattern: re.Pattern[str], s: str) -> str:
+        def repl(m: re.Match[str]) -> str:
+            left, right = m.group(1), m.group(2)
+            # Same exact column ref compared to itself — leave alone
+            if _unwrap_uid_replace(left).lower() == _unwrap_uid_replace(right).lower():
+                # Still normalize if it's a cross-alias join written identically? rare.
+                # If both sides are identical strings, wrapping both is still correct.
+                pass
+            return f"{_wrap_uid_replace(left)} = {_wrap_uid_replace(right)}"
+
+        return pattern.sub(repl, s)
+
+    text = _rewriter(_UID_EQ, text)
+    text = _rewriter(_HEX_EQ, text)
+    return text
+
+
 def normalize_sql_tables(sql: str, short_to_fq: dict[str, str]) -> str:
     """Apply all table-path fixes before BigQuery execution."""
     sql = fix_canonical_table_paths(sql, short_to_fq)
     sql = fix_table_qualifiers(sql, short_to_fq)
+    sql = normalize_user_id_joins(sql)
     return sql

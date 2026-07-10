@@ -97,7 +97,47 @@ def resolve_domain_sql(
     Build validated SQL for well-known question shapes.
     Compound multi-table questions use JOIN templates when known; otherwise AI + join hints.
     Returns (sql, table_obj, reason) or None when not a pinned domain question.
+
+    Never return COUNT aggregates when the user asked for feedback *details* / raw rows.
     """
+    from agents.answer_shape import wants_raw_tabular_data
+
+    # Contextual feedback details → row-level export, not unique_users COUNT.
+    if wants_raw_tabular_data(question):
+        try:
+            from feedback_sql import try_build_feedback_sql
+
+            raw = try_build_feedback_sql(
+                question, tables, _columns_by_table_hint(tables), relaxed=True
+            )
+            if raw and "GROUP BY" not in raw.upper() and "COUNT(" not in raw.upper():
+                from ask_plan import domain_table_override
+
+                pinned = domain_table_override(question, tables) or []
+                table = None
+                if pinned:
+                    table = next((t for t in tables if t.full_table_id == pinned[0]), None)
+                if table is None:
+                    table = next(
+                        (
+                            t
+                            for t in tables
+                            if "contextual_feedback" in (t.full_table_id or "").lower()
+                        ),
+                        tables[0] if tables else None,
+                    )
+                if table is not None:
+                    short = table.full_table_id.rsplit(".", 1)[-1]
+                    return (
+                        raw,
+                        table,
+                        f"Feedback details (row-level) on `{short}`",
+                    )
+        except Exception:
+            pass
+        # Do not fall through to measure COUNT for details/raw questions.
+        return None
+
     compound = resolve_compound_domain_sql(question, tables)
     if compound:
         return compound
@@ -134,6 +174,45 @@ def resolve_domain_sql(
     sql = compose_sql(plan, question, table)
     short = table.full_table_id.rsplit(".", 1)[-1]
     return sql, table, f"Domain SQL on `{short}`"
+
+
+def _columns_by_table_hint(tables: list[Any]) -> dict[str, set[str]]:
+    """Best-effort column sets for feedback raw SQL when full schema isn't loaded."""
+    out: dict[str, set[str]] = {}
+    for t in tables or []:
+        fq = getattr(t, "full_table_id", "") or ""
+        if not fq:
+            continue
+        cols: set[str] = set()
+        raw = getattr(t, "column_descriptions_json", None) or ""
+        if raw:
+            try:
+                import json
+
+                cols = set(json.loads(raw).keys())
+            except Exception:
+                cols = set()
+        if not cols and "contextual_feedback" in fq.lower():
+            cols = {
+                "user_id",
+                "feedback_id",
+                "feedback_trigger",
+                "feedback_type",
+                "question_id",
+                "question_order",
+                "question_type",
+                "question_text",
+                "user_answer",
+                "emoji_rating",
+                "submitted_date",
+                "enroll_plans_str",
+                "is_valid_question",
+                "is_valid_trigger",
+            }
+        if cols:
+            out[fq] = cols
+    return out
+
 
 
 def is_domain_question(question: str, tables: list[Any]) -> bool:

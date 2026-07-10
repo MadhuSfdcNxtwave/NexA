@@ -139,7 +139,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -251,7 +251,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -293,7 +293,7 @@ relations:
     join_sql: ${user_id} = ${academy_nbfc_renewals_conversion_details.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
 
 id: acad_tcs_nqt_prep_26_form_responses
 type: model
@@ -365,7 +365,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -404,7 +404,7 @@ relations:
     join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments_section_wise_scores.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: academy_users_day_and_page_wise_time_spent_details
     type: one_to_many
     join_sql: ${user_id} = ${academy_users_day_and_page_wise_time_spent_details.user_id}
@@ -509,7 +509,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -551,7 +551,7 @@ relations:
     join_sql: ${user_id} = ${academy_nbfc_renewals_conversion_details.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
 
 id: academy_course_wise_users_certificate_completion_criteria_resources
 type: model
@@ -727,7 +727,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -1050,7 +1050,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -1080,7 +1080,7 @@ relations:
     join_sql: ${user_id} = ${nps_form_responses_nov_and_dec_2025.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: z_academy_users_topin_tech_assessments
     type: one_to_many
     join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments.user_id}
@@ -1093,35 +1093,11 @@ relations:
 
 id: academy_nps_form_responses
 type: model
-format: wide
-grain: one row per user per form_submission_month
-survey:
-  wide:
-    score_column: rating_on_scale_of_0_to_10
-    submitted_at_column: form_submission_datetime
-    month_column: form_submission_month
-    text_columns:
-      - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
-      - what_limited_the_value_you_expected_from_the_program
-      - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
-      - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
-      - please_share_what_specifically_helped_in_your_job_readiness_journey
-      - what_improvements_would_help_you_feel_more_job_ready
-      - what_aspects_helped_you_feel_job_ready
-      - please_share_a_short_notea_about_what_worked_well_for_you
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`aca\
   demy_nps_form_responses`"
 measures:
   - id: count_of_records
     func: count
-  - id: unique_responders
-    func: count_distinct
-    of: user_id
-    description: Distinct users who submitted NPS form responses
-  - id: avg_nps_rating
-    func: avg
-    of: rating_on_scale_of_0_to_10
-    description: Average 0-10 NPS rating from form submissions
 dimensions:
   - id: user_month_key
     type: string
@@ -1162,7 +1138,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND DATE_TRUNC(${form_submission_month}, MONTH) = ${y_academy_user_daily_engagement_time_spent.calendar_date}
@@ -1258,7 +1234,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -1276,7 +1252,7 @@ relations:
     join_sql: ${user_id} = ${y_academy_users_placements_details.user_id}
   - id: z_ccbp_academy_users_jobs_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_jobs_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_jobs_details.user_id}
   - id: z_academy_placement_eligibility_user_wise_stage_wise_best_attempts
     type: many_to_one
     join_sql: ${user_id} = ${z_academy_placement_eligibility_user_wise_stage_wise_best_attempts.user_id}
@@ -1700,7 +1676,7 @@ relations:
     join_sql: ${conversation_id__c} = ${ai_chat_bot_users_session_details.session_id}
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${uid__c}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${uid__c}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${uid__c} = ${academy_user_profile_basic_details.user_id}
@@ -1802,7 +1778,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id},"-","") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id},"-",") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${call_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
@@ -2138,7 +2114,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: one_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id}
@@ -2177,13 +2153,13 @@ relations:
     join_sql: ${user_id} = ${academy_users_day_and_page_wise_time_spent_details.user_id}
   - id: all_users_question_wise_responses_summary_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
   - id: all_users_question_attempt_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_attempt_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_attempt_details_for_question_set_units.user_id}
   - id: all_users_bot_raw_conversation_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_bot_raw_conversation_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_bot_raw_conversation_details.user_id}
 
 id: academy_user_profile_education_details
 type: model
@@ -2340,7 +2316,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: one_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: one_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -2382,13 +2358,13 @@ relations:
     join_sql: ${user_id} = ${academy_users_day_and_page_wise_time_spent_details.user_id}
   - id: all_users_question_wise_responses_summary_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
   - id: all_users_question_attempt_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_attempt_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_attempt_details_for_question_set_units.user_id}
   - id: all_users_bot_raw_conversation_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_bot_raw_conversation_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_bot_raw_conversation_details.user_id}
 
 id: academy_users_day_and_page_wise_time_spent_details
 type: model
@@ -2403,12 +2379,6 @@ base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`aca\
 measures:
   - id: count_of_records
     func: count
-  - id: active_learning_portal_users
-    func: count_distinct
-    of: user_id
-    filters:
-      - is_lp_active
-    description: Count of unique users with learning portal access status ACTIVE (lp_status)
 dimensions:
   - id: user_date_page_key
     type: string
@@ -2429,11 +2399,6 @@ dimensions:
         • ACTIVE    (user currently has learning portal access)
         • EXPIRED   (user currently does not have learning portal access — access period expired or was explicitly removed)
         • REVOKED   (user access was removed earlier and later restored; the user currently has access)
-  - id: is_lp_active
-    type: boolean
-    expr_sql: ${lp_status} = 'ACTIVE'
-    description: TRUE when the user currently has active learning portal access
-    visibility: "internal"
   - id: time_spent_date
     type: date
     description: Date on which the user spent time on the learning portal. This
@@ -2455,7 +2420,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: nps_form_responses_nov_and_dec_2025
     type: many_to_one
     join_sql: ${user_id} = ${nps_form_responses_nov_and_dec_2025.user_id}
@@ -2575,7 +2540,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -2709,7 +2674,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -2912,25 +2877,25 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", ")
   - id: z_academy_users_npc_master_table
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", ")
   - id: z_academy_users_course_wise_completion_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_course_wise_completion_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_course_wise_completion_details.user_id}, "-", ")
   - id: academy_nps_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", ")
   - id: nps_form_responses_nov_and_dec_2025
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", ")
   - id: all_users_question_wise_responses_summary_details_for_question_set_units
     type: one_to_many
     join_sql: ${user_id} = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
@@ -2942,103 +2907,103 @@ relations:
     join_sql: ${user_id} = ${all_users_bot_raw_conversation_details.user_id}
   - id: academy_users_month_wise_streak_summary
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_users_month_wise_streak_summary.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_users_month_wise_streak_summary.user_id}, "-", ")
   - id: z_ccbp_academy_users_aipl_daily_leaderboard_details
     type: one_to_many
     join_sql: ${user_id} = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.user_id}
   - id: user_wise_league_leaderboard_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${user_wise_league_leaderboard_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${user_wise_league_leaderboard_details.user_id}, "-", ")
   - id: y_academy_user_event_engagement_details
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_event_engagement_details.user_id}
   - id: nw_events_all_users_registration_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${nw_events_all_users_registration_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${nw_events_all_users_registration_details.user_id}, "-", ")
   - id: academy_virtual_meet_up_user_attendance_details
     type: one_to_many
     join_sql: ${user_id} = ${academy_virtual_meet_up_user_attendance_details.user_id}
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", ")
   - id: z_academy_users_live_classes_recordings_watched_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_recordings_watched_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_recordings_watched_details.user_id}, "-", ")
   - id: live_classes_user_feedback_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${live_classes_user_feedback_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${live_classes_user_feedback_responses.user_id}, "-", ")
   - id: live_class_cohort_slot_wise_users_ivschats3_data
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${live_class_cohort_slot_wise_users_ivschats3_data.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${live_class_cohort_slot_wise_users_ivschats3_data.user_id}, "-", ")
   - id: z_academy_users_topin_tech_assessments
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments.user_id}, "-", ")
   - id: z_academy_users_topin_tech_assessments_section_wise_scores
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments_section_wise_scores.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments_section_wise_scores.user_id}, "-", ")
   - id: z_academy_placement_eligibility_user_wise_stage_wise_best_attempts
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${z_academy_placement_eligibility_user_wise_stage_wise_best_attempts.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_placement_eligibility_user_wise_stage_wise_best_attempts.user_id}, "-", ")
   - id: y_academy_users_placements_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${y_academy_users_placements_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${y_academy_users_placements_details.user_id}, "-", ")
   - id: z_ccbp_academy_users_jobs_details
     type: one_to_many
     join_sql: ${user_id} = ${z_ccbp_academy_users_jobs_details.user_id}
   - id: academy_course_wise_users_certificate_completion_criteria_resources
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_course_wise_users_certificate_completion_criteria_resources.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_course_wise_users_certificate_completion_criteria_resources.user_id}, "-", ")
   - id: academy_users_day_and_page_wise_time_spent_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_users_day_and_page_wise_time_spent_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_users_day_and_page_wise_time_spent_details.user_id}, "-", ")
   - id: academy_nbfc_renewals_conversion_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_nbfc_renewals_conversion_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_nbfc_renewals_conversion_details.user_id}, "-", ")
   - id: academy_student_success_salesforce_task_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_student_success_salesforce_task_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_student_success_salesforce_task_details.user_id}, "-", ")
   - id: academy_dpd_salesforce_task_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_dpd_salesforce_task_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_dpd_salesforce_task_details.user_id}, "-", ")
   - id: ai_chat_bot_users_session_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${ai_chat_bot_users_session_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${ai_chat_bot_users_session_details.user_id}, "-", ")
   - id: ai_chat_bot_users_ticket_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${ai_chat_bot_users_ticket_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${ai_chat_bot_users_ticket_details.user_id}, "-", ")
   - id: users_discussion_comments_summary_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${users_discussion_comments_summary_details.discussion_user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${users_discussion_comments_summary_details.discussion_user_id}, "-", ")
   - id: z_ccbp_users_cloudwatch_interactions_with_nav_bar
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_ccbp_users_cloudwatch_interactions_with_nav_bar.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_ccbp_users_cloudwatch_interactions_with_nav_bar.user_id}, "-", ")
   - id: user_queries_on_search_bar
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${user_queries_on_search_bar.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${user_queries_on_search_bar.user_id}, "-", ")
   - id: nbfcs_and_monthly_installments_paid_payment_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${nbfcs_and_monthly_installments_paid_payment_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${nbfcs_and_monthly_installments_paid_payment_details.user_id}, "-", ")
   - id: z_users_contextual_feedback_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_users_contextual_feedback_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_users_contextual_feedback_details.user_id}, "-", ")
   - id: feedback_successcoach_support
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${feedback_successcoach_support.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${feedback_successcoach_support.user_id}, "-", ")
   - id: irp_registration_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${irp_registration_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${irp_registration_form_responses.user_id}, "-", ")
   - id: acad_tcs_nqt_prep_26_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${acad_tcs_nqt_prep_26_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${acad_tcs_nqt_prep_26_form_responses.user_id}, "-", ")
   - id: acad_new_live_classes_batch_registration_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${acad_new_live_classes_batch_registration_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${acad_new_live_classes_batch_registration_form_responses.user_id}, "-", ")
   - id: acad_weekend_sprint_commitment_registration_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${acad_weekend_sprint_commitment_registration_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${acad_weekend_sprint_commitment_registration_form_responses.user_id}, "-", ")
   - id: academy_placement_profile_registration_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_placement_profile_registration_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_placement_profile_registration_details.user_id}, "-", ")
 
 id: academy_virtual_meet_up_user_attendance_details
 type: model
@@ -3182,16 +3147,16 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "") AND ${event_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", ") AND ${event_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
   - id: z_academy_users_npc_master_table
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", "") AND DATE_TRUNC(${event_date}, MONTH) = ${z_academy_users_npc_master_table.calendar_month}
+    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", ") AND DATE_TRUNC(${event_date}, MONTH) = ${z_academy_users_npc_master_table.calendar_month}
   - id: y_academy_user_event_engagement_details
     type: many_to_one
     join_sql: ${user_id} = ${y_academy_user_event_engagement_details.user_id} AND ${event_id} = ${y_academy_user_event_engagement_details.event_id}
@@ -3228,7 +3193,7 @@ description: >-
 
   Notes:
   - user_id and meet_host_user_id are UUIDs WITH hyphens. Apply
-    REPLACE(user_id, "-", "") when joining to tables that store user_id
+    REPLACE(user_id, "-", ") when joining to tables that store user_id
     without hyphens (e.g., z_ccbp_academy_users_master_data).
   - event_id is stored WITHOUT hyphens — matches event_id in
     academy_virtual_meet_up_user_attendance_details,
@@ -3352,7 +3317,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -3367,10 +3332,10 @@ relations:
     join_sql: ${user_id} = ${z_academy_users_npc_master_table.user_id} AND DATE_TRUNC(${event_date}, MONTH) = ${z_academy_users_npc_master_table.calendar_month}
   - id: y_academy_user_event_engagement_details
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id} AND ${event_id} = ${y_academy_user_event_engagement_details.event_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id} AND ${event_id} = ${y_academy_user_event_engagement_details.event_id}
   - id: academy_virtual_meet_up_user_attendance_details
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${academy_virtual_meet_up_user_attendance_details.user_id} AND ${event_id} = ${academy_virtual_meet_up_user_attendance_details.event_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${academy_virtual_meet_up_user_attendance_details.user_id} AND ${event_id} = ${academy_virtual_meet_up_user_attendance_details.event_id}
   - id: nw_events_all_users_registration_details
     type: many_to_one
     join_sql: ${user_id} = ${nw_events_all_users_registration_details.user_id} AND ${event_id} = ${nw_events_all_users_registration_details.event_id}
@@ -3458,7 +3423,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -3488,7 +3453,7 @@ relations:
     join_sql: ${user_id} = ${academy_student_success_salesforce_task_details.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: z_academy_users_topin_tech_assessments
     type: one_to_many
     join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments.user_id}
@@ -3632,7 +3597,7 @@ relations:
     join_sql: ${session_id} = ${ai_chat_bot_users_session_details.session_id}
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -3662,7 +3627,7 @@ relations:
     join_sql: ${user_id} = ${academy_student_success_salesforce_task_details.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: z_academy_users_topin_tech_assessments
     type: one_to_many
     join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments.user_id}
@@ -3719,10 +3684,10 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
 
 id: all_users_question_attempt_details_for_question_set_units
 type: model
@@ -3809,10 +3774,10 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
 
 id: all_users_question_wise_responses_summary_details_for_question_set_units
 type: model
@@ -3985,10 +3950,10 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
 
 id: content_ai_bot_details
 type: model
@@ -4291,7 +4256,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -4427,7 +4392,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -4457,7 +4422,7 @@ relations:
     join_sql: ${user_id} = ${academy_student_success_salesforce_task_details.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
 
 id: live_class_cohort_slot_wise_users_ivschats3_data
 type: model
@@ -4590,7 +4555,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: many_to_one
     join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id} AND ${slot_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.slot_id}
@@ -4617,7 +4582,7 @@ relations:
     join_sql: ${user_id} = ${z_academy_users_npc_master_table.user_id}
   - id: z_academy_users_course_wise_completion_details
     type: many_to_one
-    join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id} AND REPLACE(${course_id}, "-", "") = ${z_academy_users_course_wise_completion_details.course_id}
+    join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id} AND REPLACE(${course_id}, "-", ") = ${z_academy_users_course_wise_completion_details.course_id}
   - id: academy_student_success_salesforce_task_details
     type: one_to_many
     join_sql: ${user_id} = ${academy_student_success_salesforce_task_details.user_id}
@@ -4703,7 +4668,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${slot_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
@@ -4912,7 +4877,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -4934,36 +4899,11 @@ relations:
 
 id: nps_form_responses_nov_and_dec_2025
 type: model
-format: wide
-grain: one row per user per submitted_at
-survey:
-  wide:
-    score_column: on_a_scale_of_0_10_how_likely_are_you_to_recommend_nxtwaves_academy_program_to_a_friend_or_peer
-    submitted_at_column: submitted_at
-    month_column: submitted_at
-    text_columns:
-      - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
-      - what_limited_the_value_you_expected_from_the_program
-      - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
-      - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
-      - please_share_what_specifically_helped_in_your_job_readiness_journey
-      - what_improvements_would_help_you_feel_more_job_ready
-      - what_aspects_helped_you_feel_job_ready
-      - please_share_a_short_note_about_what_worked_well_for_you
-      - what_aspects_delivered_strong_value_to_you
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`nps\
   _form_responses_nov_and_dec_2025`"
 measures:
   - id: count_of_records
     func: count
-  - id: unique_responders
-    func: count_distinct
-    of: user_id
-    description: Distinct users in Nov/Dec 2025 NPS snapshot
-  - id: avg_nps_rating
-    func: avg
-    of: on_a_scale_of_0_10_how_likely_are_you_to_recommend_nxtwaves_academy_program_to_a_friend_or_peer
-    description: Average 0-10 NPS rating
 dimensions:
   - id: user_submission_key
     type: string
@@ -5004,7 +4944,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id}
@@ -5020,7 +4960,7 @@ description: >-
   specific event. Event categories covered include - VIRTUAL_MEET_UP,
   CHALLENGE, MEGA_WORKSHOP, PODCAST.
 
-  Note - user_id is stored as UUID WITH hyphens. Apply REPLACE(user_id, "-", "")
+  Note - user_id is stored as UUID WITH hyphens. Apply REPLACE(user_id, "-", ")
   when joining to tables that store user_id without hyphens (e.g.,
   y_academy_user_event_engagement_details, z_ccbp_academy_users_master_data,
   academy_virtual_meet_up_user_attendance_details).
@@ -5080,10 +5020,10 @@ dimensions:
 relations:
   - id: y_academy_user_event_engagement_details
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id} AND ${event_id} = ${y_academy_user_event_engagement_details.event_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id} AND ${event_id} = ${y_academy_user_event_engagement_details.event_id}
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -5098,7 +5038,7 @@ relations:
     join_sql: ${user_id} = ${z_academy_users_npc_master_table.user_id} AND DATE_TRUNC(DATE(${event_registration_datetime}), MONTH) = ${z_academy_users_npc_master_table.calendar_month}
   - id: academy_virtual_meet_up_user_attendance_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${academy_virtual_meet_up_user_attendance_details.user_id} AND ${event_id} = ${academy_virtual_meet_up_user_attendance_details.event_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${academy_virtual_meet_up_user_attendance_details.user_id} AND ${event_id} = ${academy_virtual_meet_up_user_attendance_details.event_id}
 
 id: user_queries_on_search_bar
 type: model
@@ -5143,7 +5083,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -5173,7 +5113,7 @@ relations:
     join_sql: ${user_id} = ${academy_student_success_salesforce_task_details.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: z_academy_users_topin_tech_assessments
     type: one_to_many
     join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments.user_id}
@@ -5203,13 +5143,13 @@ relations:
     join_sql: ${user_id} = ${ai_chat_bot_users_ticket_details.user_id}
   - id: all_users_bot_raw_conversation_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_bot_raw_conversation_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_bot_raw_conversation_details.user_id}
   - id: all_users_question_wise_responses_summary_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
   - id: all_users_question_attempt_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_attempt_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_attempt_details_for_question_set_units.user_id}
 
 id: user_wise_league_leaderboard_details
 type: model
@@ -5409,7 +5349,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -5523,7 +5463,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -5547,7 +5487,7 @@ relations:
     join_sql: ${user_id} = ${academy_nbfc_renewals_conversion_details.user_id} AND DATE_TRUNC(DATE(${creation_datetime}), MONTH) = ${academy_nbfc_renewals_conversion_details.month}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: z_academy_users_course_wise_completion_details
     type: one_to_many
     join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id}
@@ -5577,7 +5517,7 @@ relations:
     join_sql: ${user_id} = ${academy_users_day_and_page_wise_time_spent_details.user_id} AND DATE(${creation_datetime}) = ${academy_users_day_and_page_wise_time_spent_details.time_spent_date}
   - id: academy_users_relative_day_progress_snapshots
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${academy_users_relative_day_progress_snapshots.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${academy_users_relative_day_progress_snapshots.user_id}
 
 id: users_discussion_comments_summary_details
 type: model
@@ -5848,7 +5788,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${discussion_user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${discussion_user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${discussion_user_id} = ${academy_user_profile_basic_details.user_id}
@@ -5866,29 +5806,18 @@ relations:
     join_sql: ${unit_id} = ${content_question_set_units_questions_details.question_set_id} AND ${question_id} = ${content_question_set_units_questions_details.question_id}
   - id: all_users_question_wise_responses_summary_details_for_question_set_units
     type: many_to_one
-    join_sql: REPLACE(${discussion_user_id}, "-", "") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id} AND ${unit_id} = ${all_users_question_wise_responses_summary_details_for_question_set_units.question_set_id} AND ${question_id} = ${all_users_question_wise_responses_summary_details_for_question_set_units.question_id}
+    join_sql: REPLACE(${discussion_user_id}, "-", ") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id} AND ${unit_id} = ${all_users_question_wise_responses_summary_details_for_question_set_units.question_set_id} AND ${question_id} = ${all_users_question_wise_responses_summary_details_for_question_set_units.question_id}
   - id: all_users_question_attempt_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${discussion_user_id}, "-", "") = ${all_users_question_attempt_details_for_question_set_units.user_id} AND ${unit_id} = ${all_users_question_attempt_details_for_question_set_units.question_set_id} AND ${question_id} = ${all_users_question_attempt_details_for_question_set_units.question_id}
+    join_sql: REPLACE(${discussion_user_id}, "-", ") = ${all_users_question_attempt_details_for_question_set_units.user_id} AND ${unit_id} = ${all_users_question_attempt_details_for_question_set_units.question_set_id} AND ${question_id} = ${all_users_question_attempt_details_for_question_set_units.question_id}
 
 id: y_academy_user_daily_engagement_time_spent
 type: model
-description: Daily platform engagement time spent per user — use for active platform users and time-on-platform trends.
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`y_a\
   cademy_user_daily_engagement_time_spent`"
 measures:
   - id: count_of_records
     func: count
-  - id: active_platform_users
-    func: count_distinct
-    of: user_id
-    filters:
-      - has_platform_time
-    description: Users with at least 1 minute platform time on the day
-  - id: total_platform_minutes
-    func: sum
-    of: time_spent_on_platform_in_minutes
-    description: Total minutes spent on learning platform
 dimensions:
   - id: user_date_key
     type: string
@@ -5902,11 +5831,6 @@ dimensions:
   - id: time_spent_on_platform_in_minutes
     type: number
     description: total time spent on learning platform in minutes
-  - id: has_platform_time
-    type: boolean
-    expr_sql: ${time_spent_on_platform_in_minutes} >= 1
-    description: TRUE when user spent at least 1 minute on platform that day
-    visibility: "internal"
   - id: time_spent_on_live_classes_in_minutes
     type: number
     description: total time spent on live classes in minutes
@@ -5920,7 +5844,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: one_to_many
     join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id} AND ${calendar_date} = ${z_academy_users_live_classes_attendance_and_time_spent_details.slot_date}
@@ -6219,37 +6143,37 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", ")
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
   - id: z_academy_users_npc_master_table
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", ")
   - id: z_academy_users_course_wise_completion_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_course_wise_completion_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_course_wise_completion_details.user_id}, "-", ")
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", ")
   - id: academy_nps_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", ")
   - id: nps_form_responses_nov_and_dec_2025
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", ")
   - id: academy_student_success_salesforce_task_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_student_success_salesforce_task_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_student_success_salesforce_task_details.user_id}, "-", ")
   - id: z_academy_users_topin_tech_assessments
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments.user_id}, "-", ")
   - id: academy_nbfc_renewals_conversion_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_nbfc_renewals_conversion_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_nbfc_renewals_conversion_details.user_id}, "-", ")
 
 id: y_academy_users_placements_details
 type: model
@@ -6392,7 +6316,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -6726,7 +6650,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: one_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -6750,10 +6674,10 @@ relations:
     join_sql: ${user_id} = ${y_academy_users_placements_details.user_id}
   - id: z_ccbp_academy_users_jobs_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_jobs_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_jobs_details.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: academy_nps_form_responses
     type: one_to_many
     join_sql: ${user_id} = ${academy_nps_form_responses.user_id}
@@ -6806,13 +6730,13 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${last_progress_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: many_to_one
-    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id} AND REPLACE(${course_id},"-","") = ${z_academy_users_live_classes_attendance_and_time_spent_details.course_id}
+    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id} AND REPLACE(${course_id},"-",") = ${z_academy_users_live_classes_attendance_and_time_spent_details.course_id}
   - id: academy_nps_form_responses
     type: many_to_one
     join_sql: ${user_id} = ${academy_nps_form_responses.user_id} AND ${last_progress_date} = ${academy_nps_form_responses.form_submission_month}
@@ -6828,16 +6752,6 @@ base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`z_a\
 measures:
   - id: count_of_records
     func: count
-  - id: unique_users
-    func: count_distinct
-    of: user_id
-    description: Count of unique users with live class attendance records
-  - id: joined_attendance_users
-    func: count_distinct
-    of: user_id
-    filters:
-      - is_joined
-    description: Users who joined live class sessions (attendance_status = JOINED)
 dimensions:
   - id: user_slot_key
     type: string
@@ -6907,11 +6821,6 @@ dimensions:
         • CAME_BEFORE_NOT_JOINED     (didn't join but came before the session)
         • CAME_DURING_NOT_JOINED     (didn't join but came during the session)
         • CAME_AFTER_NOT_JOINED      (didn't join but came to the page after the meet ended)
-  - id: is_joined
-    type: boolean
-    expr_sql: ${attendance_status} = 'JOINED'
-    description: TRUE when user joined the live class session
-    visibility: "internal"
   - id: first_connected_datetime
     type: timestamp_naive
     description: first joined datetime of the user for the slot
@@ -6927,7 +6836,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${slot_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
@@ -7006,7 +6915,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${watched_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
@@ -7024,7 +6933,7 @@ relations:
     join_sql: ${user_id} = ${z_academy_users_npc_master_table.user_id}
   - id: z_academy_users_course_wise_completion_details
     type: many_to_one
-    join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id} AND REPLACE(${course_id}, "-", "") = ${z_academy_users_course_wise_completion_details.course_id}
+    join_sql: ${user_id} = ${z_academy_users_course_wise_completion_details.user_id} AND REPLACE(${course_id}, "-", ") = ${z_academy_users_course_wise_completion_details.course_id}
   - id: academy_nps_form_responses
     type: one_to_many
     join_sql: ${user_id} = ${academy_nps_form_responses.user_id}
@@ -7045,7 +6954,7 @@ relations:
     join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments.user_id}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: z_academy_users_topin_tech_assessments_section_wise_scores
     type: one_to_many
     join_sql: ${user_id} = ${z_academy_users_topin_tech_assessments_section_wise_scores.user_id}
@@ -7148,7 +7057,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${calendar_month} = DATE_TRUNC(${y_academy_user_daily_engagement_time_spent.calendar_date},MONTH)
@@ -7208,7 +7117,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND DATE(${assessment_start_datetime}) = ${y_academy_user_daily_engagement_time_spent.calendar_date}
@@ -7267,7 +7176,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${assessment_date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
@@ -7423,28 +7332,28 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "") AND ${date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", ") AND ${date} = ${y_academy_user_daily_engagement_time_spent.calendar_date}
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
   - id: z_academy_users_npc_master_table
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", ")
   - id: z_academy_users_course_wise_completion_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_course_wise_completion_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_course_wise_completion_details.user_id}, "-", ")
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", "") AND ${date} = ${z_academy_users_live_classes_attendance_and_time_spent_details.slot_date}
+    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", ") AND ${date} = ${z_academy_users_live_classes_attendance_and_time_spent_details.slot_date}
   - id: academy_nps_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", ")
   - id: nps_form_responses_nov_and_dec_2025
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", ")
   - id: y_academy_user_event_engagement_details
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_event_engagement_details.user_id}
@@ -7715,57 +7624,42 @@ relations:
     join_sql: ${user_id} = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_basic_details.user_id}, "-", ")
   - id: academy_user_profile_education_details
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_user_profile_education_details.user_id}, "-", ")
   - id: y_academy_user_daily_engagement_time_spent
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "") AND DATE(${applied_datetime}) = ${y_academy_user_daily_engagement_time_spent.calendar_date}
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", ") AND DATE(${applied_datetime}) = ${y_academy_user_daily_engagement_time_spent.calendar_date}
   - id: z_academy_users_npc_master_table
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", "") AND DATE_TRUNC(DATE(${applied_datetime}), MONTH) = ${z_academy_users_npc_master_table.calendar_month}
+    join_sql: ${user_id} = REPLACE(${z_academy_users_npc_master_table.user_id}, "-", ") AND DATE_TRUNC(DATE(${applied_datetime}), MONTH) = ${z_academy_users_npc_master_table.calendar_month}
   - id: y_academy_users_placements_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${y_academy_users_placements_details.user_id}, "-", "") AND ${job_id} = ${y_academy_users_placements_details.job_id}
+    join_sql: ${user_id} = REPLACE(${y_academy_users_placements_details.user_id}, "-", ") AND ${job_id} = ${y_academy_users_placements_details.job_id}
   - id: z_academy_users_topin_tech_assessments
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_topin_tech_assessments.user_id}, "-", ")
   - id: y_academy_user_event_engagement_details
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_user_event_engagement_details.user_id}
   - id: academy_nps_form_responses
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", "") AND DATE_TRUNC(DATE(${applied_datetime}), MONTH) = ${academy_nps_form_responses.form_submission_month}
+    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", ") AND DATE_TRUNC(DATE(${applied_datetime}), MONTH) = ${academy_nps_form_responses.form_submission_month}
   - id: nps_form_responses_nov_and_dec_2025
     type: many_to_one
-    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", ")
   - id: academy_student_success_salesforce_task_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_student_success_salesforce_task_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_student_success_salesforce_task_details.user_id}, "-", ")
 
 id: z_ccbp_academy_users_master_data
 type: model
-description: >-
-  Academy user master profile — one row per user. Source of truth for user
-  demographics, growth cycle, coach assignment, pause status, and learning
-  portal onboarding access. Every row is an active learning-portal user —
-  count with COUNT(DISTINCT user_id) and no default WHERE filters unless the
-  question explicitly asks about pause or onboarding access.
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`z_c\
   cbp_academy_users_master_data`"
 measures:
   - id: count_of_records
     func: count
-  - id: active_learning_portal_users
-    func: count_distinct
-    of: user_id
-    filters: []
-    description: >-
-      Every row in master is an active learning-portal user. Do not add
-      pause_status or onboarding-access filters unless the question asks.
-      For currently ACTIVE access (~34k), prefer lp_status from
-      academy_users_day_and_page_wise_time_spent_details.
 dimensions:
   - id: user_id
     type: string
@@ -7779,16 +7673,6 @@ dimensions:
     type: string
     description: Indicates whether the user’s learning schedule is paused; 'Pause'
       means paused, NULL means active
-  - id: is_not_paused
-    type: boolean
-    expr_sql: ${pause_status} IS NULL
-    description: TRUE when the user is not on a learning pause
-    visibility: "internal"
-  - id: has_portal_access_granted
-    type: boolean
-    expr_sql: ${learning_portal_onboarding_access_given_datetime} IS NOT NULL
-    description: TRUE when learning portal onboarding access was granted
-    visibility: "internal"
   - id: preferred_languages_for_communication
     type: string
     description: Preferred language(s) selected by the user for communication
@@ -7841,16 +7725,16 @@ dimensions:
 relations:
   - id: y_academy_user_daily_engagement_time_spent
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${y_academy_user_daily_engagement_time_spent.user_id}, "-", ")
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.user_id}, "-", ")
   - id: nps_form_responses_nov_and_dec_2025
     type: one_to_one
-    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${nps_form_responses_nov_and_dec_2025.user_id}, "-", ")
   - id: academy_nps_form_responses
     type: one_to_many
-    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", "")
+    join_sql: ${user_id} = REPLACE(${academy_nps_form_responses.user_id}, "-", ")
   - id: all_users_question_wise_responses_summary_details_for_question_set_units
     type: one_to_many
     join_sql: ${user_id} = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
@@ -8027,7 +7911,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
 
   - id: academy_user_profile_basic_details
     type: many_to_one
@@ -8075,7 +7959,7 @@ relations:
 
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
 
 id: z_ccbp_users_cloudwatch_interactions_with_live_classes
 type: model
@@ -8144,7 +8028,7 @@ description: >-
   Promotional Discovery
   - LIVE_CLASSES_NEW_ON_NXTWAVE_CLICKED
 
-  Note: user_id is stored as UUID WITH hyphens. Apply REPLACE(user_id, "-", "")
+  Note: user_id is stored as UUID WITH hyphens. Apply REPLACE(user_id, "-", ")
   when joining to tables that store user_id without hyphens.
 
   Analytics Guidance
@@ -8184,7 +8068,7 @@ dimensions:
     description: Composite primary key combining user_id, interaction, and event_time for each Live Classes interaction record
   - id: user_id
     type: string
-    description: Unique identifier of the user who performed the interaction (UUID with hyphens). Apply REPLACE(user_id, "-", "") when joining to tables that store user_id without hyphens.
+    description: Unique identifier of the user who performed the interaction (UUID with hyphens). Apply REPLACE(user_id, "-", ") when joining to tables that store user_id without hyphens.
   - id: event_time
     type: timestamp_naive
     description: >-
@@ -8349,7 +8233,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -8370,17 +8254,17 @@ relations:
     join_sql: ${user_id} = ${nps_form_responses_nov_and_dec_2025.user_id}
   - id: z_academy_users_live_classes_attendance_and_time_spent_details
     type: one_to_many
-    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id} AND REPLACE(${course_id}, "-", "") = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.course_id}, "-", "")
+    join_sql: ${user_id} = ${z_academy_users_live_classes_attendance_and_time_spent_details.user_id} AND REPLACE(${course_id}, "-", ") = REPLACE(${z_academy_users_live_classes_attendance_and_time_spent_details.course_id}, "-", ")
   - id: live_classes_attendance_by_cohort
     type: one_to_many
     target: z_academy_users_live_classes_attendance_and_time_spent_details
     join_sql: ${user_id} = ${live_classes_attendance_by_cohort.user_id} AND ${cohort_id} = ${live_classes_attendance_by_cohort.cohort_id}
   - id: z_academy_users_live_classes_recordings_watched_details
     type: one_to_many
-    join_sql: ${user_id} = ${z_academy_users_live_classes_recordings_watched_details.user_id} AND REPLACE(${course_id}, "-", "") = REPLACE(${z_academy_users_live_classes_recordings_watched_details.course_id}, "-", "")
+    join_sql: ${user_id} = ${z_academy_users_live_classes_recordings_watched_details.user_id} AND REPLACE(${course_id}, "-", ") = REPLACE(${z_academy_users_live_classes_recordings_watched_details.course_id}, "-", ")
   - id: live_classes_user_feedback_responses
     type: one_to_many
-    join_sql: ${user_id} = ${live_classes_user_feedback_responses.user_id} AND REPLACE(${course_id}, "-", "") = REPLACE(${live_classes_user_feedback_responses.course_id}, "-", "")
+    join_sql: ${user_id} = ${live_classes_user_feedback_responses.user_id} AND REPLACE(${course_id}, "-", ") = REPLACE(${live_classes_user_feedback_responses.course_id}, "-", ")
 
 id: z_ccbp_users_cloudwatch_interactions_with_nav_bar
 type: model
@@ -8464,7 +8348,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -8542,7 +8426,7 @@ description: >-
   - role_title is the primary business dimension for roadmap engagement analysis.
   - value_prop_label is the primary business dimension for value proposition engagement analysis.
 
-  Note: user_id is stored as UUID WITH hyphens. Apply REPLACE(user_id, "-", "")
+  Note: user_id is stored as UUID WITH hyphens. Apply REPLACE(user_id, "-", ")
   when joining to tables that store user_id without hyphens.
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`z_c\
   cbp_users_cloudwatch_interactions_with_role_roadmaps`"
@@ -8617,11 +8501,11 @@ dimensions:
       Populated only for ROLE_ROADMAPS_ACTIVE_CARD_CLICKED.
   - id: user_id
     type: string
-    description: Unique identifier of the user who performed the interaction (UUID with hyphens). Apply REPLACE(user_id, "-", "") when joining to tables that store user_id without hyphens.
+    description: Unique identifier of the user who performed the interaction (UUID with hyphens). Apply REPLACE(user_id, "-", ") when joining to tables that store user_id without hyphens.
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -8643,22 +8527,6 @@ relations:
 
 id: z_users_contextual_feedback_details
 type: model
-format: long
-grain: one row per user per question response
-survey:
-  long:
-    question_col: question_text
-    answer_col: user_answer
-    trigger_col: feedback_trigger
-    type_col: question_type
-    topic_columns:
-      - user_answer
-      - question_text
-      - feedback_trigger
-topic_columns:
-  - user_answer
-  - question_text
-  - feedback_trigger
 description: >-
   Captures contextual, in-app user feedback collected on the CCBP learning platform
   based on specific user triggers (events or page visits).
@@ -8769,7 +8637,7 @@ dimensions:
 relations:
   - id: z_ccbp_academy_users_master_data
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_master_data.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
   - id: academy_user_profile_basic_details
     type: many_to_one
     join_sql: ${user_id} = ${academy_user_profile_basic_details.user_id}
@@ -8820,7 +8688,7 @@ relations:
     join_sql: ${user_id} = ${academy_nbfc_renewals_conversion_details.user_id} AND DATE_TRUNC(${submitted_date}, MONTH) = ${academy_nbfc_renewals_conversion_details.month}
   - id: y_academy_user_event_engagement_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${y_academy_user_event_engagement_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${y_academy_user_event_engagement_details.user_id}
   - id: y_academy_users_placements_details
     type: one_to_many
     join_sql: ${user_id} = ${y_academy_users_placements_details.user_id}
@@ -8844,61 +8712,95 @@ relations:
     join_sql: ${user_id} = ${acad_tcs_nqt_prep_26_form_responses.user_id}
   - id: all_users_bot_raw_conversation_details
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_bot_raw_conversation_details.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_bot_raw_conversation_details.user_id}
   - id: all_users_question_wise_responses_summary_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_wise_responses_summary_details_for_question_set_units.user_id}
   - id: all_users_question_attempt_details_for_question_set_units
     type: one_to_many
-    join_sql: REPLACE(${user_id}, "-", "") = ${all_users_question_attempt_details_for_question_set_units.user_id}
+    join_sql: REPLACE(${user_id}, "-", ") = ${all_users_question_attempt_details_for_question_set_units.user_id}
   - id: z_ccbp_academy_users_aipl_daily_leaderboard_details
     type: many_to_one
-    join_sql: REPLACE(${user_id}, "-", "") = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.user_id} AND ${submitted_date} = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.date}
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.user_id} AND ${submitted_date} = ${z_ccbp_academy_users_aipl_daily_leaderboard_details.date}
 
-id: nps_all_form_responses
-type: logical_model
-format: wide
-description: >-
-  Unified NPS form responses across the ongoing monthly table and the Nov/Dec 2025
-  legacy snapshot. Use this model for topic search and feedback analysis spanning
-  all NPS submissions.
+id: academy_nbfc_renewals_conversion_details
+type: model
+base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`academy_nbfc_renewals_conversion_details`"
 measures:
   - id: count_of_records
     func: count
-    description: Total NPS form response rows across union members
-  - id: unique_responders
-    func: count_distinct
-    of: user_id
-    description: Distinct users with NPS form submissions (union of both tables)
-union:
-  - academy_nps_form_responses
-  - nps_form_responses_nov_and_dec_2025
-union_align:
-  user_id: [user_id, user_id]
-  submitted_at: [form_submission_datetime, submitted_at]
-  form_submission_month: [form_submission_month, _derive_month]
-  nps_rating:
-    - rating_on_scale_of_0_to_10
-    - on_a_scale_of_0_10_how_likely_are_you_to_recommend_nxtwaves_academy_program_to_a_friend_or_peer
-  worked_well:
-    - please_share_a_short_noteA_about_what_worked_well_for_you
-    - please_share_a_short_note_about_what_worked_well_for_you
-  aspects_job_ready: [what_aspects_helped_you_feel_job_ready, what_aspects_helped_you_feel_job_ready]
-  improvements_job_ready:
-    - what_improvements_would_help_you_feel_more_job_ready
-    - what_improvements_would_help_you_feel_more_job_ready
-  limited_value:
-    - what_limited_the_value_you_expected_from_the_program
-    - what_limited_the_value_you_expected_from_the_program
-  improvements_recommend:
-    - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
-    - what_improvements_would_help_you_recommend_nxtwave_with_more_confidence
-  helped_journey:
-    - please_share_what_specifically_helped_in_your_job_readiness_journey
-    - please_share_what_specifically_helped_in_your_job_readiness_journey
-  aspects_recommend:
-    - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
-    - what_aspects_of_the_program_made_you_feel_confident_to_recommend_us
-  value_for_money:
-    - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
-    - do_you_feel_the_program_delivers_value_for_the_time_and_money_you_have_invested
+dimensions:
+  - id: user_month_key
+    type: string
+    expr_sql: CONCAT(${user_id}, '-', CAST(${month} AS STRING))
+    unique: true
+    visibility: "internal"
+    description: Composite primary key combining user_id and month for each user's monthly renewal record
+  - id: renewal_done_in_nbfc_user
+    type: string
+    description: User ID if the renewal application (full or partial coverage) was
+      initiated via NBFC; NULL otherwise.
+  - id: m_plus_3_and_above_user
+    type: string
+    description: User ID if the renewal application (full or partial coverage) was
+      initiated 3 or more months after the expected month; NULL otherwise.
+  - id: m_plus_1_user
+    type: string
+    description: User ID if the renewal application (full or partial coverage) was
+      initiated 1 month after the expected month; NULL otherwise.
+  - id: month
+    type: date
+    description: Calendar month in which a renewal is expected for the user. This
+      can include both past and future months.
+  - id: renewal_done_in_flex_user
+    type: string
+    description: User ID if the renewal application (full or partial coverage) was
+      initiated or resumed via Flex; NULL otherwise.
+  - id: flex_amount_paid_till_now
+    type: number
+    description: Cumulative amount paid by the user via Flex up to and including the
+      given month.
+  - id: late_done_user
+    type: string
+    description: User ID if the renewal application (full or partial coverage) was
+      initiated after the expected month; NULL otherwise.
+  - id: renewal_done_user
+    type: string
+    description: User ID if the user has initiated a renewal application to cover
+      the remaining amount fully or partially; NULL otherwise.
+  - id: m_plus_2_user
+    type: string
+    description: User ID if the renewal application (full or partial coverage) was
+      initiated 2 months after the expected month; NULL otherwise.
+  - id: renewal_not_yet_done_user
+    type: string
+    description: User ID if the user has not initiated any renewal application to
+      cover the remaining amount (fully or partially); NULL otherwise.
+  - id: next_tenure_expected_tag
+    type: boolean
+    description: Indicates whether the user is expected to start a new application
+      in the given month (TRUE for all the records).
+  - id: remaining_amount_to_be_paid
+    type: number
+    description: Remaining payable amount as of the given month. Only values greater
+      than 1000 are considered for renewal tracking.
+  - id: user_id
+    type: string
+    description: Unique identifier of the user (UUID format with hyphens).
+  - id: on_time_done_user
+    type: string
+    description: User ID if the renewal application (full or partial coverage) was
+      initiated in the expected month; NULL otherwise.
+relations:
+  - id: z_ccbp_academy_users_master_data
+    type: many_to_one
+    join_sql: REPLACE(${user_id}, "-", ") = ${z_ccbp_academy_users_master_data.user_id}
+  - id: z_academy_users_npc_master_table
+    type: one_to_one
+    join_sql: ${user_id} = ${z_academy_users_npc_master_table.user_id} AND ${month} = ${z_academy_users_npc_master_table.calendar_month}
+  - id: y_academy_user_daily_engagement_time_spent
+    type: one_to_many
+    join_sql: ${user_id} = ${y_academy_user_daily_engagement_time_spent.user_id} AND ${month} = DATE_TRUNC(${y_academy_user_daily_engagement_time_spent.calendar_date}, MONTH)
+  - id: academy_nps_form_responses
+    type: one_to_one
+    join_sql: ${user_id} = ${academy_nps_form_responses.user_id} AND ${month} = ${academy_nps_form_responses.form_submission_month}
