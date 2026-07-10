@@ -147,6 +147,21 @@ def sql_intent_mismatch_reason(
         if re.search(r"\bmonth", q, re.I) and not re.search(r"\bGROUP BY\b", sql_text, re.I):
             return "monthly NPS scores require GROUP BY month"
 
+    # Promoter / detractor / passive counts must filter the rating band.
+    if re.search(r"\b(promoters?|detractors?|passives?)\b", q, re.I):
+        if re.search(r"unique_responders", sql_text, re.I) and not re.search(
+            r"promoter|detractor|passive|BETWEEN|>=\s*9|<=\s*6", sql_text, re.I
+        ):
+            return "promoter/detractor questions must filter rating_on_scale_of_0_to_10"
+        if re.search(r"\bpromoter", q, re.I) and not re.search(
+            r">=\s*9|BETWEEN\s*9\s*AND\s*10|promoter", sql_text, re.I
+        ):
+            return "promoter count requires rating 9–10 filter"
+        if re.search(r"\bdetractor", q, re.I) and not re.search(
+            r"<=\s*6|BETWEEN\s*0\s*AND\s*6|detractor", sql_text, re.I
+        ):
+            return "detractor count requires rating 0–6 filter"
+
     return None
 
 

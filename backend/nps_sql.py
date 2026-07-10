@@ -43,6 +43,17 @@ def _pick_aspect_col(cols: set[str]) -> str | None:
 _LEGACY = re.compile(r"\b(nov|dec).{0,12}2025|snapshot|legacy\b", re.I)
 _PROMOTER = re.compile(r"\bpromoter", re.I)
 _DETRACTOR = re.compile(r"\bdetractor", re.I)
+_PASSIVE = re.compile(r"\bpassive", re.I)
+_BY = re.compile(r"\bby\s+(gender|state|city|retention|coach|institute|[a-z_][a-z0-9_]*)\b", re.I)
+_NPS_THRESHOLD = re.compile(
+    r"\b(above|over|greater(?:\s+than)?|>=|below|under|less(?:\s+than)?|<=)\s+(\d+)\b",
+    re.I,
+)
+_UNIQUE_USERS = re.compile(
+    r"\b(unique|distinct)\s+(users?|responders?|students?|participants?)\b|"
+    r"\b(how many|count of)\s+(users?|students?|responders?|participants?)\b",
+    re.I,
+)
 
 _MASTER_DIMS: dict[str, str] = {
     "gender": "gender",
@@ -191,6 +202,23 @@ def _month_date_filter(
 
     if month_col:
         return f"`{month_col}` = DATE '{year}-{month:02d}-01'"
+
+    # Prefer datetime when month bucket column is absent.
+    dt_col = next(
+        (
+            c
+            for c in nps_cols
+            if c.lower() in ("form_submission_datetime", "submitted_date", "submitted_at")
+        ),
+        None,
+    )
+    if dt_col:
+        from calendar import monthrange
+
+        last = monthrange(year, month)[1]
+        start = date(year, month, 1)
+        end = date(year, month, last)
+        return date_filter_sql(dt_col, start, end)
     return ""
 
 
@@ -393,8 +421,41 @@ ORDER BY avg_nps DESC"""
             f"WHERE {' AND '.join(filt)}"
         )
 
+    # Scalar promoter / detractor / passive counts (before NPS score — "nps promoters" is not score).
+    band = None
+    alias = None
+    if _PROMOTER.search(q):
+        band, alias = f"`{score_col}` BETWEEN 9 AND 10", "promoter_count"
+    elif _DETRACTOR.search(q):
+        band, alias = f"`{score_col}` BETWEEN 0 AND 6", "detractor_count"
+    elif _PASSIVE.search(q):
+        band, alias = f"`{score_col}` BETWEEN 7 AND 8", "passive_count"
+
+    if band and alias and not dim:
+        wants_users = bool(_UNIQUE_USERS.search(q))
+        agg = (
+            f"COUNT(DISTINCT `user_id`) AS `{alias}`"
+            if wants_users and "user_id" in nps_cols
+            else f"COUNT(*) AS `{alias}`"
+        )
+        filt = [f"`{score_col}` IS NOT NULL", band]
+        if date_f:
+            filt.append(date_f)
+        return (
+            f"SELECT {agg}\n"
+            f"FROM `{nps_fq}`\n"
+            f"WHERE {' AND '.join(filt)}"
+        )
+
     # Canonical NPS score — (promoters − detractors) / total, not AVG.
-    if _NPS_SCORE.search(q) and not _AVG.search(q) and not dim:
+    if (
+        _NPS_SCORE.search(q)
+        and not _AVG.search(q)
+        and not dim
+        and not _PROMOTER.search(q)
+        and not _DETRACTOR.search(q)
+        and not _PASSIVE.search(q)
+    ):
         filt = base_filters + [f"`{score_col}` IS NOT NULL"]
         where = f"\nWHERE {' AND '.join(filt)}" if filt else ""
         return (
