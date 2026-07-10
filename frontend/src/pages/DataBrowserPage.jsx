@@ -228,6 +228,33 @@ function ModelYamlImport({ onImported }) {
 
   const applyPaste = () => runImport({ yaml: text }, true);
 
+  const pruneToYaml = async () => {
+    if (
+      !window.confirm(
+        "Remove workspace tables that are NOT in workspace_models.yaml?\n\n" +
+          "This deletes extras added by full BigQuery dataset sync. " +
+          "YAML models (~55 tables) are kept."
+      )
+    ) {
+      return;
+    }
+    setErr("");
+    setLoading(true);
+    try {
+      const result = await api.pruneWorkspaceToYaml();
+      await onImported(result);
+      setMsg(
+        `Pruned catalog: kept ${result.kept} · removed ${result.removed} ` +
+          `(YAML has ${result.yaml_tables} tables)`
+      );
+      setTimeout(() => setMsg(""), 8000);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const onFileChange = async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
@@ -290,6 +317,15 @@ function ModelYamlImport({ onImported }) {
           disabled={loading || !text.trim()}
         >
           Apply paste
+        </button>
+        <button
+          type="button"
+          className="secondary small"
+          onClick={pruneToYaml}
+          disabled={loading}
+          title="Remove tables not listed in workspace_models.yaml"
+        >
+          Keep only YAML tables
         </button>
         {msg && <span className="success-msg">{msg}</span>}
         {err && <span className="error small">{err}</span>}

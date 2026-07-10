@@ -250,6 +250,8 @@ export const api = {
     req(`/workspace/tables/${tableId}/join-hints`, { method: "PUT", body: { join_hints } }),
   importWorkspaceModels: (body) =>
     req("/workspace/models/import", { method: "POST", body }),
+  pruneWorkspaceToYaml: () =>
+    req("/workspace/models/prune-to-yaml", { method: "POST", body: {} }),
 
   listTables: (id) => req(`/projects/${id}/tables`),
   addTable: (id, full_table_id) =>

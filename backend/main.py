@@ -1538,6 +1538,16 @@ def import_workspace_models(
     return _import_models_impl(body, db)
 
 
+@app.post("/workspace/models/prune-to-yaml")
+def prune_workspace_to_yaml(
+    _: User = Depends(require_admin),
+):
+    """Remove catalog tables that are not in workspace_models.yaml (admin only)."""
+    from prune_workspace_to_yaml import prune
+
+    return prune(dry_run=False)
+
+
 def _model_description_extras(model: dict) -> str:
     """Append measures + business aliases to table description for routing/SQL."""
     parts: list[str] = []
