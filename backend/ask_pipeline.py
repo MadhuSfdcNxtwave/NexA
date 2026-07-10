@@ -56,6 +56,9 @@ def _table_notes(tables: list) -> dict[str, str]:
         parts: list[str] = []
         if (t.description or "").strip():
             parts.append(t.description.strip())
+        overview = (getattr(t, "ai_overview", "") or "").strip()
+        if overview:
+            parts.append(f"[AI OVERVIEW] {overview[:1200]}")
         if getattr(t, "endorsed", False):
             parts.append("[ENDORSED — preferred table for AI queries across the workspace]")
         if parts:
@@ -2865,6 +2868,7 @@ def iter_ask(
     query_reason = (query_plan.reason if query_plan else "") or ""
     if query_plan and query_plan.viz_hint:
         presentation_hints.append(f"viz_hint:{query_plan.viz_hint}")
+    table_kb_context = kb.build_answer_kb_context(knowledges)
     try:
         viz_rows, chart_spec, analysis = llm.build_presentation(
             question,
@@ -2877,6 +2881,7 @@ def iter_ask(
             conversation_context=conversation_context,
             glossary_context=glossary_ctx,
             query_reason=query_reason,
+            table_kb_context=table_kb_context,
         )
     except Exception as pres_err:
         from presentation import heuristic_analyze, infer_chart_spec

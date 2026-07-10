@@ -455,15 +455,17 @@ def _strip_sql_fences(text: str) -> str:
 
 TABLE_ROUTER_SYSTEM = (
     "You route an analytics question to the right BigQuery table(s). "
-    "You get a catalog: every table's name, description, and AI data profile "
-    "(real coverage dates, key columns, join keys). "
+    "You get a catalog: every table's name, TABLE DESCRIPTION, analytics guidance, "
+    "and AI OVERVIEW / data profile. "
+    "Treat TABLE DESCRIPTION and AI OVERVIEW as the primary knowledge base for routing — "
+    "prefer them over table-name word overlap. "
     'Respond with ONLY JSON: {"tables": ["full_table_id", ...], "reason": "one sentence"}. '
     "Rules: pick the FEWEST tables that fully answer the question — usually 1. "
     "Add a second/third table ONLY when a join is genuinely required "
     "(e.g. metrics from one table filtered by attributes stored in another). "
-    "Match on what the data MEANS, not word overlap: a question naming a specific metric "
-    "(NPS, placements, revenue) belongs to the table that stores that metric — "
-    "not a generic feedback/survey table that merely mentions the word. "
+    "Match on what the DESCRIPTION / OVERVIEW say the table is FOR "
+    "(NPS, placements, portal page activity, attendance, etc.) — "
+    "not a generic feedback/survey table that merely mentions a word. "
     "Prefer tables whose data coverage includes the asked period. "
     "Use exact full_table_id values from the catalog."
 )
@@ -709,6 +711,8 @@ ANALYSIS_SYSTEM = (
     "You are NexA — an intelligent analytics copilot (think Jarvis for data).\n"
     "Rules:\n"
     "- Answer EVERY part of the user's question. Do not skip dimensions they asked about.\n"
+    "- If TABLE KNOWLEDGE (description / AI overview) is provided, use it to explain "
+    "what was measured and why that table is the right source — in plain English.\n"
     "- Structure your response naturally covering:\n"
     "  (1) Direct answer — headline finding first\n"
     "  (2) What happened — key numbers and patterns from the data\n"
@@ -720,7 +724,8 @@ ANALYSIS_SYSTEM = (
     "distinct companies and total students placed, then highlight top companies.\n"
     "- If conversation history is provided, briefly connect to prior context.\n"
     "- For multi-part questions, answer EVERY part with its number.\n"
-    "- Never mention SQL, tables, columns, BigQuery, or internal row counts.\n"
+    "- Never mention SQL, BigQuery, or internal row counts. You may name the business "
+    "metric/source in plain language (e.g. 'portal page activity', 'NPS responses').\n"
     "- Do NOT invent trends, comparisons, or numbers not in the data.\n"
     "- Use 6–10 sentences for breakdowns or analytical questions; 5–7 for single metrics.\n"
     "- Conversational, precise, no markdown headers.\n"
@@ -739,6 +744,7 @@ def analyze(
     conversation_context: str = "",
     glossary_context: str = "",
     query_reason: str = "",
+    table_kb_context: str = "",
 ) -> str:
     hints = "\n".join(f"- {h}" for h in (presentation_hints or []))
     entity_block = f"Topic: {entity_label}\n" if entity_label else ""
@@ -753,6 +759,12 @@ def analyze(
         if (glossary_context or "").strip()
         else ""
     )
+    kb_block = (
+        f"\nTABLE KNOWLEDGE (description + AI overview — use for 'what was measured'):\n"
+        f"{table_kb_context.strip()}\n"
+        if (table_kb_context or "").strip()
+        else ""
+    )
     reason_block = (
         f"\nQuery intent: {query_reason.strip()}\n" if (query_reason or "").strip() else ""
     )
@@ -762,7 +774,8 @@ def analyze(
         else ""
     )
     prompt = (
-        f"Question: {question}\n{entity_block}{conv_block}{glossary_block}{reason_block}{sql_block}"
+        f"Question: {question}\n{entity_block}{conv_block}{glossary_block}{kb_block}"
+        f"{reason_block}{sql_block}"
         f"Returned {row_count} rows. Columns: {columns}\n"
         f"Data (sample): {json.dumps(sample_rows, default=str)[:5000]}\n"
     )
@@ -817,6 +830,7 @@ def build_presentation(
     conversation_context: str = "",
     glossary_context: str = "",
     query_reason: str = "",
+    table_kb_context: str = "",
 ) -> tuple[list[dict], dict, str]:
     """Chart spec + dashboard prep + business-friendly analysis."""
     from chart_prepare import prepare_chart
@@ -846,6 +860,7 @@ def build_presentation(
             conversation_context=conversation_context,
             glossary_context=glossary_context,
             query_reason=query_reason,
+            table_kb_context=table_kb_context,
         )
     return viz_rows, chart_spec, analysis
 
