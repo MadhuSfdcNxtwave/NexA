@@ -2518,8 +2518,23 @@ def iter_ask(
                             )
                             if raw_sql and "GROUP BY" not in raw_sql.upper():
                                 template_sql = raw_sql
-                                semantic_reason = "Raw feedback export SQL"
+                                semantic_reason = (
+                                    "Contextual feedback details — when submitted, "
+                                    "what about (trigger), question asked, and user answer"
+                                )
                                 sql_source = "feedback_raw"
+                                # Steer analysis + UI toward the human story columns.
+                                hints = list(getattr(query_ctx, "presentation_hints", None) or [])
+                                hints.extend(
+                                    [
+                                        "Lead with when_submitted, feedback_about, question, feedback_answer",
+                                        "Summarize what users said and which triggers/pages drove feedback",
+                                    ]
+                                )
+                                try:
+                                    query_ctx.presentation_hints = hints
+                                except Exception:
+                                    pass
                                 ask_trace(
                                     "feedback_raw_sql",
                                     question=question[:200],
