@@ -17,12 +17,23 @@ from db import User, get_db
 _bearer = HTTPBearer(auto_error=False)
 
 
+def _password_bytes(password: str) -> bytes:
+    """bcrypt only uses the first 72 bytes — truncate safely."""
+    raw = (password or "").encode("utf-8")
+    return raw[:72]
+
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+    if not password_hash:
+        return False
+    try:
+        return bcrypt.checkpw(_password_bytes(password), password_hash.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 
 def create_access_token(user: User) -> str:

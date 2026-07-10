@@ -14,17 +14,23 @@ export default function AdminPage() {
   if (!isAdmin()) return <Navigate to="/" replace />;
 
   const reload = async () => {
+    setError("");
+    // Load users first — don't let usage/projects failures hide the user list.
     try {
-      const [u, log, p] = await Promise.all([
-        api.adminListUsers(),
-        api.adminUsage(50),
-        api.listProjects(),
-      ]);
-      setUsers(u);
-      setUsage(log);
-      setProjects(p);
+      const u = await api.adminListUsers();
+      setUsers(Array.isArray(u) ? u : []);
     } catch (e) {
-      setError(e.message);
+      setUsers([]);
+      setError(e.message || "Could not load users");
+      return;
+    }
+    try {
+      const [log, p] = await Promise.all([api.adminUsage(50), api.listProjects()]);
+      setUsage(Array.isArray(log) ? log : []);
+      setProjects(Array.isArray(p) ? p : []);
+    } catch (e) {
+      // Users already loaded — show a soft warning for the rest.
+      setError((prev) => prev || e.message);
     }
   };
 
@@ -37,13 +43,32 @@ export default function AdminPage() {
     setError("");
     try {
       await api.adminCreateUser({
-        email: form.email,
-        name: form.name,
+        email: form.email.trim(),
+        name: form.name.trim(),
         password: form.password,
         credits_balance: parseFloat(form.credits_balance) || 100,
       });
       setForm({ email: "", name: "", password: "", credits_balance: "100" });
       reload();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const resetPassword = async (u) => {
+    const pwd = prompt(
+      `New password for ${u.email} (min 6 characters).\nShare it with the user securely.`,
+      ""
+    );
+    if (pwd == null) return;
+    if (pwd.trim().length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+    setError("");
+    try {
+      await api.adminUpdateUser(u.id, { password: pwd });
+      alert(`Password updated for ${u.email}. They can sign in now.`);
     } catch (err) {
       setError(err.message);
     }
@@ -89,7 +114,10 @@ export default function AdminPage() {
         </section>
 
         <section className="admin-section">
-          <h2>Users</h2>
+          <h2>Users ({users.length})</h2>
+          {users.length === 0 ? (
+            <p className="muted">No users loaded. If you just opened Admin, check the error above — or create a user with the form.</p>
+          ) : (
           <table className="admin-table">
             <thead>
               <tr><th>Email</th><th>Name</th><th>Role</th><th>Credits</th><th>Active</th><th></th></tr>
@@ -100,11 +128,14 @@ export default function AdminPage() {
                   <td>{u.email}</td>
                   <td>{u.name}</td>
                   <td>{u.role}</td>
-                  <td>{u.role === "admin" ? "Unlimited" : u.credits_balance.toFixed(2)}</td>
+                  <td>{u.role === "admin" ? "Unlimited" : Number(u.credits_balance ?? 0).toFixed(2)}</td>
                   <td>{u.is_active ? "Yes" : "No"}</td>
                   <td>
                     <button type="button" className="secondary small" onClick={() => setCredits(u.id, u.credits_balance, u.role)}>
                       Set credits
+                    </button>
+                    <button type="button" className="secondary small" onClick={() => resetPassword(u)}>
+                      Reset password
                     </button>
                     {currentUser?.id !== u.id && (
                       <button type="button" className="secondary small danger" onClick={() => deleteUser(u)}>
@@ -116,6 +147,7 @@ export default function AdminPage() {
               ))}
             </tbody>
           </table>
+          )}
         </section>
 
         <section className="admin-section">
