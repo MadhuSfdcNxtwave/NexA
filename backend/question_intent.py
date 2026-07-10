@@ -481,6 +481,8 @@ def resolve_user_name_source(
         "academy_user_profile_basic_details",
         "z_ccbp_academy_users_master_data",
     )
+    # Some tables store UUID with hyphens, others without — always normalize both sides.
+    user_id_join_on = "REPLACE(s.`user_id`, '-', '') = REPLACE(p.`user_id`, '-', '')"
     candidates: list[tuple[str, set[str], str]] = []
     for t in included_tables or []:
         fq = getattr(t, "full_table_id", "") or ""
@@ -490,13 +492,7 @@ def resolve_user_name_source(
         names = _pick_name_columns(cols)
         if not names:
             continue
-        short = fq.rsplit(".", 1)[-1].lower()
-        # Master user_id is typically unhyphenated; profile/attendance use UUID hyphens.
-        if "master_data" in short:
-            on_sql = "REPLACE(s.`user_id`, '-', '') = p.`user_id`"
-        else:
-            on_sql = "s.`user_id` = p.`user_id`"
-        candidates.append((fq, set(names), on_sql))
+        candidates.append((fq, set(names), user_id_join_on))
 
     def _rank(item: tuple[str, set[str], str]) -> tuple[int, str]:
         short = item[0].rsplit(".", 1)[-1].lower()
@@ -511,13 +507,9 @@ def resolve_user_name_source(
             fq = getattr(t, "full_table_id", "") or ""
             short = fq.rsplit(".", 1)[-1].lower()
             if "academy_user_profile_basic_details" in short:
-                return fq, ["first_name", "last_name"], "s.`user_id` = p.`user_id`"
+                return fq, ["first_name", "last_name"], user_id_join_on
             if "master_data" in short:
-                return (
-                    fq,
-                    ["first_name", "last_name"],
-                    "REPLACE(s.`user_id`, '-', '') = p.`user_id`",
-                )
+                return fq, ["first_name", "last_name"], user_id_join_on
         return None, [], ""
 
     candidates.sort(key=_rank)
@@ -616,7 +608,9 @@ def expand_drill_down_followup(
         "Reuse the SAME table and WHERE filters as the prior query.",
         (
             "SELECT DISTINCT user_id plus names via JOIN to academy_user_profile_basic_details "
-            "(first_name, last_name) when the fact table has no name columns."
+            "(first_name, last_name) when the fact table has no name columns. "
+            "Join with REPLACE(s.user_id, '-', '') = REPLACE(p.user_id, '-', '') "
+            "(hyphen formats differ across tables)."
             if wants_names
             else "SELECT DISTINCT user_id (not COUNT)."
         ),

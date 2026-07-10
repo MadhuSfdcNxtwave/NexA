@@ -106,6 +106,11 @@ class DrillDownContinuityTests(unittest.TestCase):
         self.assertIn("JOINED", out)
         self.assertIn("2026-07-09", out)
         self.assertIn("LEFT JOIN", out)
+        # Hyphen formats differ across tables — normalize both sides.
+        self.assertIn(
+            "REPLACE(s.`user_id`, '-', '') = REPLACE(p.`user_id`, '-', '')",
+            out,
+        )
 
     def test_id_list_followup_chips(self):
         from presentation import suggest_id_list_followups
