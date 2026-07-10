@@ -7749,8 +7749,9 @@ type: model
 description: >-
   Academy user master profile — one row per user. Source of truth for user
   demographics, growth cycle, coach assignment, pause status, and learning
-  portal onboarding access. Use for counts of active learning-portal users
-  (pause_status IS NULL and portal access granted).
+  portal onboarding access. Every row is an active learning-portal user —
+  count with COUNT(DISTINCT user_id) and no default WHERE filters unless the
+  question explicitly asks about pause or onboarding access.
 base_sql_table: "`kossip-helpers`.`academy_success_ai_analytics_worksapce`.`z_c\
   cbp_academy_users_master_data`"
 measures:
@@ -7759,11 +7760,10 @@ measures:
   - id: active_learning_portal_users
     func: count_distinct
     of: user_id
-    filters:
-      - is_not_paused
-      - has_portal_access_granted
+    filters: []
     description: >-
-      Users with learning portal onboarding access granted and not paused.
+      Every row in master is an active learning-portal user. Do not add
+      pause_status or onboarding-access filters unless the question asks.
       For currently ACTIVE access (~34k), prefer lp_status from
       academy_users_day_and_page_wise_time_spent_details.
 dimensions:

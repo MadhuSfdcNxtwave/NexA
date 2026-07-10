@@ -24,13 +24,11 @@ terms:
     model_id: z_ccbp_academy_users_master_data
     measure_id: active_learning_portal_users
     intent: aggregate
-    filters:
-      - is_not_paused
-      - has_portal_access_granted
+    filters: []
     description: >-
-      Users with learning portal onboarding access granted and not paused.
-      Source of truth is master data (~34,795). NOT the same as lp_status=ACTIVE
-      on the engagement table (~34,000).
+      Every row in master data is an active learning-portal user (~source of truth).
+      Do not add pause_status / onboarding filters unless explicitly asked.
+      NOT the same as lp_status=ACTIVE on the engagement table.
 
   - id: lp_status_active_users
     label: Currently ACTIVE portal status (engagement table)

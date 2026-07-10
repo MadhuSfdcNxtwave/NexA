@@ -90,11 +90,8 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
         id="learning_portal_active_users",
         table_short="z_ccbp_academy_users_master_data",
         question_re=_PORTAL_ACTIVE_COUNT,
-        reason="Active learning portal users (master profile — not paused, access granted)",
-        filters=(
-            SqlFilter("pause_status", "IS NULL"),
-            SqlFilter("learning_portal_onboarding_access_given_datetime", "IS NOT NULL"),
-        ),
+        reason="Active learning portal users (master profile — every row is active)",
+        filters=(),
         score_penalty_shorts=("question_wise", "question_set", "day_and_page_wise"),
     ),
     RoutingRule(

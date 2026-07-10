@@ -15,7 +15,9 @@
   expect_tables:
     - z_ccbp_academy_users_master_data
   expect_sql_contains:
-    - pause_status
+    - COUNT
+    - user_id
+    - z_ccbp_academy_users_master_data
   expect_sql_not_contains:
     - lp_status
   expect_intent: aggregate
