@@ -53,16 +53,11 @@ def date_hints_for_question(question: str) -> list[str]:
 
 
 def prompt_block_for_question(question: str, tables: list | None = None) -> str:
-    """Compact block injected into SQL generation prompts."""
-    from table_business_rules import format_table_rules_block, table_skips_default_filters
+    """YAML metric + date hints for SQL prompts (table business_rules handled separately)."""
+    from table_business_rules import table_skips_default_filters
 
     lines: list[str] = []
     q = (question or "").lower()
-
-    table_block = format_table_rules_block(tables or [])
-    if table_block:
-        lines.append(table_block)
-
     skip_yaml = any(table_skips_default_filters(t) for t in (tables or []))
 
     if re.search(r"\bactive\b.{0,30}\b(learning[\s_-]*portal|portal)\b", q):

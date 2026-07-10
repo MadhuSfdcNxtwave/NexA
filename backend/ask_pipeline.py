@@ -1978,21 +1978,24 @@ def iter_ask(
         from sql_composer import enrich_schema_with_measures
 
         schema_text = enrich_schema_with_measures(schema_text, selected[0])
-    schema_text = _compact_schema_text(schema_text, num_tables=len(selected))
 
     from agents.pipeline_bridge import (
         agents_enabled,
-        business_rules_block,
         critic_validate_and_fix,
         enrich_schema_context,
         sql_model_for_question,
         try_learned_pattern,
     )
+    from business_rules_loader import prompt_block_for_question
+    from table_business_rules import prepend_rules_to_schema
 
     schema_text = enrich_schema_context([t.full_table_id for t in selected], schema_text)
-    rules_block = business_rules_block(question, tables=selected)
-    if rules_block:
-        schema_text += "\n\n" + rules_block
+    yaml_hints = prompt_block_for_question(question, tables=selected)
+    if yaml_hints:
+        schema_text += "\n\n" + yaml_hints
+    # Compact schema body, then put selected-table rules at the TOP (never truncated).
+    schema_text = _compact_schema_text(schema_text, num_tables=len(selected))
+    schema_text = prepend_rules_to_schema(schema_text, selected)
     model_used = sql_model_for_question(question) if agents_enabled() else config.FETCH_MODEL
 
     routing_meta = _routing_meta(plan=plan, selected=selected)

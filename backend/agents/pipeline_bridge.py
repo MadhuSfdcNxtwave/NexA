@@ -60,9 +60,19 @@ def enrich_schema_context(table_ids: list[str], base_schema: str) -> str:
 
 
 def business_rules_block(question: str, tables: list | None = None) -> str:
-    if not agents_enabled():
-        return ""
-    return prompt_block_for_question(question, tables=tables)
+    """Selected-table business_rules (mandatory) + YAML metric/date hints."""
+    from table_business_rules import build_mandatory_rules_preamble
+
+    parts: list[str] = []
+    if tables:
+        preamble = build_mandatory_rules_preamble(tables)
+        if preamble:
+            parts.append(preamble)
+    if agents_enabled():
+        yaml_block = prompt_block_for_question(question, tables=tables)
+        if yaml_block:
+            parts.append(yaml_block)
+    return "\n\n".join(parts)
 
 
 def try_learned_pattern(question: str) -> PatternMatch | None:
