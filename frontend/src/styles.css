@@ -3881,6 +3881,27 @@ button.full-width { width: 100%; justify-content: center; }
   text-align: right;
 }
 
+.viz-table-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.viz-table-pager button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.viz-table-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
 .viz-table-modal-overlay {
   position: fixed;
   inset: 0;
@@ -4915,6 +4936,12 @@ button.full-width { width: 100%; justify-content: center; }
   background: var(--surface-1, #fff);
   border: 1px solid var(--border, #e5e4de);
   margin-bottom: 12px;
+}
+.insight-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 14px;
 }
 .insight-meta {
   display: flex;

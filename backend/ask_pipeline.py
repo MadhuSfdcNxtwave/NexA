@@ -197,10 +197,27 @@ def _attach_suggestions(
 ) -> dict[str, Any]:
     if result.get("suggestions"):
         return result
+    from presentation import is_user_id_list_result, suggest_id_list_followups
+
+    cols = result.get("columns") or []
+    rows = result.get("rows") or []
+    sql = result.get("sql") or ""
+    q = result.get("question") or ""
+    if (
+        result.get("sql_source") == "drill_down"
+        or is_user_id_list_result(cols, rows, sql=sql, question=q)
+    ):
+        result["suggestions"] = suggest_id_list_followups(
+            q,
+            sql=sql,
+            columns=cols,
+            selected_tables=result.get("selected_tables") or [],
+        )
+        return result
     result["suggestions"] = llm.suggest_followups(
-        result.get("question") or "",
+        q,
         analysis=result.get("analysis") or "",
-        columns=result.get("columns") or None,
+        columns=cols or None,
         schema_excerpt=schema_text,
         error_context=error_context,
     )
@@ -1121,6 +1138,7 @@ def _plan_event(plan) -> dict:
         "type": "search_tables",
         "message": plan.status_message,
         "keywords": plan.keywords,
+        "routing_reason": getattr(plan, "routing_reason", "") or "",
         "tables": [
             {
                 "full_table_id": m.full_table_id,
@@ -1577,6 +1595,17 @@ def iter_ask(
     if expanded_question != original_question.strip():
         question = expanded_question
 
+    from agents.query_shape import detect_query_shape, query_shape_status_message
+
+    query_shape = detect_query_shape(
+        original_question,
+        prior_sql=prior_sql,
+        prior_question=prior_q,
+    )
+    shape_msg = query_shape_status_message(query_shape)
+    if shape_msg:
+        yield {"type": "status", "message": shape_msg}
+
     query_ctx = build_query_context(
         question,
         original_question=original_question,
@@ -1839,6 +1868,7 @@ def iter_ask(
     yield {
         "type": "view_tables",
         "count": len(selected),
+        "routing_reason": plan.routing_reason or "",
         "tables": [
             {"full_table_id": t.full_table_id, "short_name": _short(t.full_table_id)}
             for t in selected
@@ -2050,6 +2080,9 @@ def iter_ask(
             "# Do NOT use COUNT/COUNT DISTINCT aggregates. SELECT row-level columns.\n\n"
             + schema_text
         )
+    shape_checkpoint = query_shape.to_schema_checkpoint() if query_shape else ""
+    if shape_checkpoint:
+        schema_text = shape_checkpoint + "\n\n" + schema_text
     model_used = sql_model_for_question(question) if agents_enabled() else config.FETCH_MODEL
 
     routing_meta = _routing_meta(plan=plan, selected=selected)
@@ -2077,16 +2110,93 @@ def iter_ask(
         chain_plan: list[dict[str, str]] = []
         from domain_sql import is_domain_question, resolve_domain_sql
 
-        if not config.HEX_STYLE_PIPELINE:
+        # Thread continuity first: rewrite prior COUNT → SELECT DISTINCT user_id
+        # (paginated LIMIT/OFFSET) before domain/chain/LLM.
+        if prior_sql and not has_clarification:
+            from question_intent import (
+                is_drill_down_data_request,
+                is_list_pagination_request,
+                is_user_id_list_sql,
+                parse_list_page_request,
+                rewrite_aggregate_to_user_list_sql,
+            )
+            from ask_plan import _tables_from_prior_sql
+
+            want_page = is_list_pagination_request(original_question) and (
+                is_user_id_list_sql(prior_sql) or is_drill_down_data_request(original_question)
+            )
+            want_drill = is_drill_down_data_request(original_question) or is_drill_down_data_request(
+                question
+            )
+            if want_page or want_drill:
+                page_info = parse_list_page_request(original_question, prior_sql=prior_sql)
+                page = page_info["page"] if (want_page or is_user_id_list_sql(prior_sql)) else 1
+                if want_drill and not want_page and not is_user_id_list_sql(prior_sql):
+                    page = 1
+                rewritten = rewrite_aggregate_to_user_list_sql(
+                    prior_sql,
+                    page=page,
+                    page_size=page_info["page_size"],
+                )
+                drill_table = selected[0] if selected else None
+                if not drill_table:
+                    prior_ids = _tables_from_prior_sql(prior_sql, included_tables or [])
+                    if prior_ids:
+                        drill_table = next(
+                            (t for t in (included_tables or []) if t.full_table_id == prior_ids[0]),
+                            None,
+                        )
+                if rewritten and drill_table:
+                    try:
+                        drill_sql = bq.validate_select_only(rewritten)
+                        domain_resolved = (
+                            drill_sql,
+                            drill_table,
+                            (
+                                f"Drill-down page {page} "
+                                f"(LIMIT {page_info['page_size']} OFFSET {(page - 1) * page_info['page_size']})"
+                            ),
+                        )
+                        selected = [drill_table]
+                        yield {
+                            "type": "status",
+                            "message": (
+                                f"Continuing prior query — user ids page {page} "
+                                f"({page_info['page_size']} per page). "
+                                "Ask «next page» for more."
+                            ),
+                        }
+                        ask_trace(
+                            "drill_down_sql",
+                            question=original_question[:200],
+                            hit=True,
+                            sql_preview=(drill_sql or "")[:300],
+                            early=True,
+                            page=page,
+                            page_size=page_info["page_size"],
+                        )
+                    except ValueError:
+                        domain_resolved = None
+
+        if not domain_resolved and not config.HEX_STYLE_PIPELINE:
             domain_resolved = resolve_domain_sql(question, included_tables)
 
         if config.HEX_STYLE_PIPELINE and not domain_resolved:
             from notebook_planner import plan_notebook_steps
+            from question_intent import (
+                is_drill_down_data_request,
+                is_list_pagination_request,
+            )
 
             skip_chain = bool(
                 query_plan
                 and query_plan.intent in ("topic_search", "survey_distribution")
             )
+            # Never multi-step chain for «give those user id» / next page — single rewrite.
+            if is_drill_down_data_request(original_question) or is_list_pagination_request(
+                original_question
+            ):
+                skip_chain = True
             if (
                 not skip_chain
                 and config.SQL_CHAIN_ENABLED
@@ -2112,7 +2222,11 @@ def iter_ask(
             hints_map = _column_hints_map(selected)
             inferred, columns_by_table = _infer_hints_for_tables(selected)
             sql = template_sql
-            sql_source = "domain"
+            sql_source = (
+                "drill_down"
+                if "Drill-down" in (domain_reason or "")
+                else "domain"
+            )
             chain_steps = None
             routing_meta = {
                 **routing_meta,
@@ -2120,7 +2234,7 @@ def iter_ask(
                 "sql_source": sql_source,
             }
             ask_trace(
-                "domain_sql",
+                "domain_sql" if sql_source == "domain" else "drill_down_sql",
                 question=question[:200],
                 hit=True,
                 reason=domain_reason,
@@ -2240,29 +2354,47 @@ def iter_ask(
                         except ValueError:
                             template_sql = None
 
-                # Drill-down: rewrite prior COUNT → SELECT DISTINCT user_id (same WHERE).
+                # Drill-down: rewrite prior COUNT → SELECT DISTINCT user_id (paginated).
                 if not template_sql and prior_sql and not has_clarification:
                     from question_intent import (
                         is_drill_down_data_request,
+                        is_list_pagination_request,
+                        is_user_id_list_sql,
+                        parse_list_page_request,
                         rewrite_aggregate_to_user_list_sql,
                     )
 
-                    if is_drill_down_data_request(original_question) or is_drill_down_data_request(
+                    want_page = is_list_pagination_request(original_question)
+                    want_drill = is_drill_down_data_request(original_question) or is_drill_down_data_request(
                         question
-                    ):
-                        drill_sql = rewrite_aggregate_to_user_list_sql(prior_sql)
+                    )
+                    if want_page or want_drill:
+                        page_info = parse_list_page_request(
+                            original_question, prior_sql=prior_sql
+                        )
+                        page = page_info["page"] if (
+                            want_page or is_user_id_list_sql(prior_sql)
+                        ) else 1
+                        if want_drill and not want_page and not is_user_id_list_sql(prior_sql):
+                            page = 1
+                        drill_sql = rewrite_aggregate_to_user_list_sql(
+                            prior_sql,
+                            page=page,
+                            page_size=page_info["page_size"],
+                        )
                         if drill_sql:
                             try:
                                 template_sql = bq.validate_select_only(drill_sql)
                                 sql_source = "drill_down"
                                 semantic_reason = (
-                                    "Drill-down — listing user_id with prior filters"
+                                    f"Drill-down page {page} — listing user_id with prior filters"
                                 )
                                 ask_trace(
                                     "drill_down_sql",
                                     question=original_question[:200],
                                     hit=True,
                                     sql_preview=(template_sql or "")[:300],
+                                    page=page,
                                 )
                             except ValueError:
                                 template_sql = None
@@ -2994,12 +3126,17 @@ def iter_ask(
     if query_plan and query_plan.viz_hint:
         presentation_hints.append(f"viz_hint:{query_plan.viz_hint}")
     table_kb_context = kb.build_answer_kb_context(knowledges)
+    # Present against the user's original wording (not expanded drill-down prompt).
+    present_q = display_question or original_question or question
+    # Drill-down must never use multi-step chain analysis.
+    present_steps = None if (sql_source == "drill_down" or not chain_steps) else chain_steps
     try:
         viz_rows, chart_spec, analysis = llm.build_presentation(
-            question,
+            present_q,
             columns,
             rows,
             sample=sample,
+            chain_steps=present_steps,
             sql=sql or "",
             entity_label=query_ctx.entity_label,
             presentation_hints=presentation_hints,
@@ -3013,9 +3150,9 @@ def iter_ask(
         from chart_prepare import prepare_chart
 
         ask_trace("presentation_fallback", error=str(pres_err)[:200])
-        fallback_spec = infer_chart_spec(question, columns, rows)
-        viz_rows, chart_spec = prepare_chart(rows, columns, fallback_spec, question)
-        analysis = heuristic_analyze(question, columns, rows, len(rows))
+        fallback_spec = infer_chart_spec(present_q, columns, rows)
+        viz_rows, chart_spec = prepare_chart(rows, columns, fallback_spec, present_q)
+        analysis = heuristic_analyze(present_q, columns, rows, len(rows), sql=sql or "")
 
     # Empty / zero results: tell the user what date ranges actually have data.
     if _looks_empty_result(rows):

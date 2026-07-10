@@ -243,6 +243,9 @@ CACHE_ANSWER_ENABLED = os.environ.get("CACHE_ANSWER_ENABLED", "true").strip().lo
 )
 MEMORY_MAX_ROWS = int(os.environ.get("MEMORY_MAX_ROWS", "500"))
 NOTEBOOK_MAX_ROWS = int(os.environ.get("NOTEBOOK_MAX_ROWS", "2000"))
+# Drill-down user-id lists: page size for LIMIT/OFFSET pagination.
+DRILL_DOWN_PAGE_SIZE = int(os.environ.get("DRILL_DOWN_PAGE_SIZE", "500"))
+DRILL_DOWN_MAX_PAGE_SIZE = int(os.environ.get("DRILL_DOWN_MAX_PAGE_SIZE", "2000"))
 
 # Schema explorer agent: per-table context cache TTL (sample values, date ranges).
 SCHEMA_CACHE_TTL_HOURS = float(os.environ.get("SCHEMA_CACHE_TTL_HOURS", "6"))

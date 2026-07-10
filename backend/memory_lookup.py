@@ -162,8 +162,12 @@ def sql_intent_mismatch_reason(
         ):
             return "detractor count requires rating 0–6 filter"
 
-    # "this year" / period questions must include a date filter in SQL.
-    if re.search(r"\b(this year|current year|ytd|this month|last month|yesterday)\b", q, re.I):
+    # "this year" / explicit year / period questions must include a date filter in SQL.
+    if re.search(
+        r"\b(this year|current year|ytd|this month|last month|yesterday|20\d{2})\b",
+        q,
+        re.I,
+    ):
         if re.search(r"\b(placed|placement|got\s+jobs?|promoter|nps|attend)\b", q, re.I):
             if not re.search(
                 r"date_of_placement|form_submission|slot_date|calendar_date|"

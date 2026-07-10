@@ -8,7 +8,7 @@ import ThreadResultsPanel from "./ThreadResultsPanel.jsx";
 import ThreadChatSkeleton from "./ThreadChatSkeleton.jsx";
 import ClarificationPanel from "./ClarificationDialog.jsx";
 import AskProgress from "./AskProgress.jsx";
-import { IconPlus } from "./Icons.jsx";
+import { IconPlus, IconStop } from "./Icons.jsx";
 import {
   startAskJob,
   updateAskJobProgress,
@@ -17,6 +17,8 @@ import {
   getAskJob,
   matchesAskJob,
   subscribeAskJob,
+  stopAskJob,
+  getAskAbortSignal,
 } from "../askStore.js";
 import { normalizeAskResult, memoryToTurn, mergeTurns } from "../askResult.js";
 import TableMentionInput from "./TableMentionInput.jsx";
@@ -81,16 +83,18 @@ export default function AskSection({
   const [workspaceTables, setWorkspaceTables] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [forceFresh, setForceFresh] = useState(true);
+  const [forceFresh, setForceFresh] = useState(false);
   const [askProgress, setAskProgress] = useState(null);
   const [clarification, setClarification] = useState(null);
   const [memLoading, setMemLoading] = useState(true);
   const [activeTurnIdx, setActiveTurnIdx] = useState(-1);
   const [pendingQ, setPendingQ] = useState("");
-  const [mobilePane, setMobilePane] = useState("results");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [threadOverview, setThreadOverview] = useState("");
+  const [mobilePane, setMobilePane] = useState("agent"); // analysis | agent
+  const [syncTick, setSyncTick] = useState(0);
   const chatEndRef = useRef(null);
+  const agentTurnRefs = useRef([]);
   const pendingQuestionRef = useRef(initialQuestion?.trim() || null);
 
   const displayName = isStandalone ? (threadTitle || "your data") : projectName;
@@ -149,17 +153,19 @@ export default function AskSection({
         next.status = event.message;
         next.phase = "plan";
       }
+      if (event.type === "view_tables") {
+        next.viewedTables = event.tables || [];
+        if (event.routing_reason) next.routingReason = event.routing_reason;
+        next.phase = "plan";
+      }
       if (event.type === "search_tables") {
         next.status = event.message || next.status;
         next.keywords = event.keywords || [];
         next.tables = event.tables || [];
+        if (event.routing_reason) next.routingReason = event.routing_reason;
         next.phase = "plan";
       }
       if (event.type === "reasoning") next.reasoning = event.text;
-      if (event.type === "view_tables") {
-        next.viewedTables = event.tables || [];
-        next.phase = "plan";
-      }
       if (event.type === "match_columns") {
         next.status = event.message || next.status;
         next.matchedColumns = event.tables || [];
@@ -227,9 +233,12 @@ export default function AskSection({
         const next = [...prev];
         next[idx] = turn;
         setActiveTurnIdx(idx);
+        setSyncTick((n) => n + 1);
         return next;
       }
       setActiveTurnIdx(prev.length);
+      setSyncTick((n) => n + 1);
+      setMobilePane("analysis");
       return [...prev, turn];
     });
     setPendingQ("");
@@ -263,12 +272,14 @@ export default function AskSection({
     setLoading(true);
     setError("");
     setPendingQ(text);
-    setMobilePane("agent");
+    // New ask is a new turn — don't keep the previous turn "active" while loading.
+    setActiveTurnIdx(-1);
     startAskJob(
       isStandalone
         ? { standalone: true, threadId: standaloneThreadId, projectId: null, question: text }
         : { projectId: id, threadId: threadIdRef.current, question: text },
     );
+    const signal = getAskAbortSignal();
     setAskProgress({ status: "Starting…", keywords: [], tables: [], viewedTables: [], phase: "plan" });
 
     let approvalPayload = null;
@@ -297,6 +308,7 @@ export default function AskSection({
         clarificationText: clarOpts?.clarificationText,
         refinedQuestion: clarOpts?.refinedQuestion,
         pinnedTableIds: extractPinnedTableIds(text, workspaceTables),
+        signal,
       };
 
       let res = isStandalone
@@ -328,19 +340,19 @@ export default function AskSection({
               approvalPayload.question,
               approvalPayload.sql,
               applyProgressEvent,
+              { signal },
             )
           : await api.askConfirmStream(
               id,
               approvalPayload.question,
               approvalPayload.sql,
               applyProgressEvent,
-              { threadId: threadIdRef.current },
+              { threadId: threadIdRef.current, signal },
             );
       }
 
       if (res) {
         appendTurn(text, res);
-        setMobilePane("results");
         if (isStandalone) {
           api.getThread(standaloneThreadId)
             .then((t) => setThreadOverview(t.overview_kb || ""))
@@ -363,9 +375,14 @@ export default function AskSection({
       }
     } catch (e) {
       if (scopeMatches()) {
-        setError(e.message);
-        setPendingQ("");
-        setAskJobError(e.message);
+        if (e?.stopped || e?.name === "AbortError" || e?.message === "Stopped") {
+          setError("");
+          setPendingQ("");
+        } else {
+          setError(e.message);
+          setPendingQ("");
+          setAskJobError(e.message);
+        }
       }
     } finally {
       if (scopeMatches() && !clarPayload) {
@@ -374,6 +391,14 @@ export default function AskSection({
         finishAskJob();
       }
     }
+  };
+
+  const stopAsk = () => {
+    stopAskJob();
+    setLoading(false);
+    setAskProgress(null);
+    setPendingQ("");
+    setError("");
   };
 
   const handleClarification = async (choiceId, choiceText, refinedQuestion) => {
@@ -486,7 +511,55 @@ export default function AskSection({
     }
   };
 
-  const askSuggestion = (suggestion) => runAsk(suggestion);
+  const downloadTurnCsv = (turn) => {
+    if (!turn?.rows?.length) return false;
+    const cols = turn.columns?.length ? turn.columns : Object.keys(turn.rows[0] || {});
+    const escape = (val) => {
+      if (val == null) return "";
+      const s = String(val);
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const csv = [
+      cols.map(escape).join(","),
+      ...turn.rows.map((row) => cols.map((c) => escape(row[c])).join(",")),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nexa-export-${turn.rows.length}-rows.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  };
+
+  const selectTurn = (idx, { from = "analysis" } = {}) => {
+    setActiveTurnIdx(idx);
+    setSyncTick((n) => n + 1);
+    if (from === "agent") {
+      setMobilePane("analysis");
+    } else if (from === "analysis") {
+      requestAnimationFrame(() => {
+        const el = agentTurnRefs.current[idx];
+        if (el?.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    }
+  };
+
+  const askSuggestion = (suggestion) => {
+    const s = (suggestion || "").trim();
+    const lower = s.toLowerCase();
+    if (lower === "export as csv" || lower === "download csv") {
+      const turn =
+        (activeTurnIdx >= 0 && turns[activeTurnIdx]) ||
+        turns[turns.length - 1];
+      if (downloadTurnCsv(turn)) return;
+    }
+    runAsk(s);
+  };
 
   const ask = async () => {
     const question = q.trim();
@@ -608,7 +681,6 @@ export default function AskSection({
   }, [turns, loading, pendingQ]);
 
   const activeTurn = activeTurnIdx >= 0 && activeTurnIdx < turns.length ? turns[activeTurnIdx] : null;
-  const resultsLoading = loading && !activeTurn;
 
   return (
     <div className="thread-page thread-page-split">
@@ -694,31 +766,30 @@ export default function AskSection({
         )}
       </div>
 
-      <div className="thread-mobile-tabs" role="tablist" aria-label="Panel">
+      <div className="thread-mobile-tabs" role="tablist" aria-label="Ask panes">
         <button
           type="button"
           role="tab"
-          aria-selected={mobilePane === "results"}
-          className={`thread-mobile-tab ${mobilePane === "results" ? "active" : ""}`}
-          onClick={() => setMobilePane("results")}
+          className={mobilePane === "analysis" ? "active" : ""}
+          aria-selected={mobilePane === "analysis"}
+          onClick={() => setMobilePane("analysis")}
         >
-          Results
+          Analysis
         </button>
         <button
           type="button"
           role="tab"
+          className={mobilePane === "agent" ? "active" : ""}
           aria-selected={mobilePane === "agent"}
-          className={`thread-mobile-tab ${mobilePane === "agent" ? "active" : ""}`}
           onClick={() => setMobilePane("agent")}
         >
           Agent
-          {(loading || pendingQ) && <span className="thread-mobile-tab-dot" aria-hidden />}
         </button>
       </div>
 
       <div className="thread-split">
         <aside
-          className={`thread-results-pane ${mobilePane === "results" ? "mobile-visible" : "mobile-hidden"}`}
+          className={`thread-results-pane${mobilePane === "agent" ? " mobile-hidden" : ""}`}
           aria-label="Results"
         >
           <header className="thread-pane-header results-pane-header">
@@ -728,22 +799,23 @@ export default function AskSection({
           <ThreadResultsPanel
             turns={turns}
             activeTurnIdx={activeTurnIdx}
-            onSelectTurn={(i) => {
-              setActiveTurnIdx(i);
-            }}
+            onSelectTurn={(i) => selectTurn(i, { from: "analysis" })}
             turn={activeTurn}
-            loading={resultsLoading || (loading && !!activeTurn)}
+            loading={loading}
             askProgress={askProgress}
+            pendingQuestion={pendingQ}
             threadOverview={threadOverview}
             onPin={isStandalone ? undefined : pinToDashboard}
             pinDisabled={loading}
             onRerunSql={rerunSql}
             rerunDisabled={loading}
+            onFollowUp={askSuggestion}
+            followUpDisabled={loading}
           />
         </aside>
 
         <section
-          className={`thread-agent-pane ${mobilePane === "agent" ? "mobile-visible" : "mobile-hidden"}`}
+          className={`thread-agent-pane${mobilePane === "analysis" ? " mobile-hidden" : ""}`}
           aria-label="Agent"
         >
           <header className="thread-pane-header agent-pane-header">
@@ -791,15 +863,14 @@ export default function AskSection({
             {!memLoading && turns.map((t, i) => (
               <div
                 key={`${i}-${t.question.slice(0, 24)}`}
-                className={`thread-turn-card ${i === activeTurnIdx ? "active" : ""}`}
+                ref={(el) => { agentTurnRefs.current[i] = el; }}
+                className={`thread-turn-card ${i === activeTurnIdx ? "active" : ""}${i === activeTurnIdx ? " flash-sync" : ""}`}
+                data-sync={i === activeTurnIdx ? syncTick : undefined}
               >
                 <button
                   type="button"
                   className="thread-turn-select"
-                  onClick={() => {
-                    setActiveTurnIdx(i);
-                    setMobilePane("results");
-                  }}
+                  onClick={() => selectTurn(i, { from: "agent" })}
                 >
                   <div className="thread-q">
                     <div className="thread-avatar user">You</div>
@@ -922,17 +993,35 @@ export default function AskSection({
               )}
               <div className="hero-prompt-footer">
                 <div className="hero-prompt-left">
-                  <label className="toggle-label fresh-query-toggle" title="Skip cached answers">
+                  <label
+                    className="toggle-label fresh-query-toggle"
+                    title="Re-run on BigQuery and skip cached answers. Thread memory (prior SQL and filters) is still used for follow-ups."
+                  >
                     <input
                       type="checkbox"
                       checked={forceFresh}
                       onChange={(e) => setForceFresh(e.target.checked)}
                     />
-                    Fresh BQ
+                    <span className="fresh-toggle-text">
+                      Re-run BQ
+                      <span className="fresh-toggle-hint">keeps thread memory</span>
+                    </span>
                   </label>
                 </div>
                 <div className="hero-prompt-right">
-                  <SendButton compact onClick={() => ask()} disabled={loading || !q.trim()} />
+                  {loading ? (
+                    <button
+                      type="button"
+                      className="send-btn send-btn-compact stop-btn"
+                      onClick={stopAsk}
+                      title="Stop"
+                      aria-label="Stop"
+                    >
+                      <IconStop />
+                    </button>
+                  ) : (
+                    <SendButton compact onClick={() => ask()} disabled={!q.trim()} />
+                  )}
                 </div>
               </div>
             </div>

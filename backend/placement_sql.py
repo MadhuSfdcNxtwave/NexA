@@ -30,7 +30,7 @@ def try_build_placement_sql(
     if not is_placement_count_question(question):
         return None
 
-    from question_dates import date_filter_sql, pick_date_column, resolve_relative_range
+    from question_dates import date_filter_sql, pick_date_column, resolve_question_date_range
 
     table = None
     for t in tables or []:
@@ -48,7 +48,7 @@ def try_build_placement_sql(
     )
 
     where: list[str] = []
-    rel = resolve_relative_range(question)
+    rel = resolve_question_date_range(question)
     if rel:
         where.append(date_filter_sql(date_col, rel[0], rel[1]))
 

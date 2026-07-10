@@ -25,6 +25,9 @@ const REQUEST_TIMEOUT_MS = 90000;
 function networkErrorMessage(err) {
   const waking =
     "The API may be waking up (Render free tier) — wait up to a minute and refresh.";
+  if (err?.stopped || err?.message === "Stopped") {
+    return "Stopped";
+  }
   if (err?.name === "AbortError") {
     return import.meta.env.DEV
       ? "Backend is not responding — start the API server on port 8000 and refresh."
@@ -37,6 +40,53 @@ function networkErrorMessage(err) {
   }
   return err?.message || "Request failed";
 }
+
+async function readAskSse(res, onEvent, signal) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResult = null;
+  const onAbort = () => {
+    reader.cancel().catch(() => {});
+  };
+  if (signal) {
+    if (signal.aborted) {
+      onAbort();
+      const err = new Error("Stopped");
+      err.name = "AbortError";
+      err.stopped = true;
+      throw err;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        const err = new Error("Stopped");
+        err.name = "AbortError";
+        err.stopped = true;
+        throw err;
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data: ")) continue;
+        const event = JSON.parse(line.slice(6));
+        onEvent?.(event);
+        if (event.type === "complete") finalResult = event;
+        if (event.type === "error") throw new Error(event.message || "Ask failed");
+      }
+    }
+    return finalResult;
+  } finally {
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 
 function headers(json = false, { auth = true } = {}) {
   const h = {};
@@ -131,10 +181,12 @@ export const api = {
       clarificationText,
       refinedQuestion,
       pinnedTableIds = [],
+      signal = null,
     } = opts;
     const res = await fetch(`${BASE}/threads/${threadId}/ask/stream`, {
       method: "POST",
       headers: headers(true),
+      signal: signal || undefined,
       body: JSON.stringify({
         question,
         force_fresh: forceFresh,
@@ -154,31 +206,14 @@ export const api = {
       } catch (_) {}
       throw new Error(detail);
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResult = null;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() || "";
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data: ")) continue;
-        const event = JSON.parse(line.slice(6));
-        onEvent?.(event);
-        if (event.type === "complete") finalResult = event;
-        if (event.type === "error") throw new Error(event.message || "Ask failed");
-      }
-    }
-    return finalResult;
+    return readAskSse(res, onEvent, signal);
   },
-  askThreadConfirmStream: async (threadId, question, sql, onEvent) => {
+  askThreadConfirmStream: async (threadId, question, sql, onEvent, opts = {}) => {
+    const { signal = null } = opts;
     const res = await fetch(`${BASE}/threads/${threadId}/ask/confirm/stream`, {
       method: "POST",
       headers: headers(true),
+      signal: signal || undefined,
       body: JSON.stringify({ question, sql }),
     });
     if (handleUnauthorized(res)) {
@@ -191,26 +226,7 @@ export const api = {
       } catch (_) {}
       throw new Error(detail);
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResult = null;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() || "";
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data: ")) continue;
-        const event = JSON.parse(line.slice(6));
-        onEvent?.(event);
-        if (event.type === "complete") finalResult = event;
-        if (event.type === "error") throw new Error(event.message || "Ask failed");
-      }
-    }
-    return finalResult;
+    return readAskSse(res, onEvent, signal);
   },
   listCollections: () => req("/collections"),
   createCollection: (name, description = "") =>
@@ -272,10 +288,11 @@ export const api = {
     req(`/projects/${id}/memory${threadId ? `?thread_id=${threadId}` : ""}`, { method: "DELETE" }),
   ask: (id, question) =>
     req(`/projects/${id}/ask`, { method: "POST", body: { question } }),
-  askStream: async (id, question, onEvent, { forceFresh = false, clarificationChoice, clarificationText, refinedQuestion, threadId = null, pinnedTableIds = [] } = {}) => {
+  askStream: async (id, question, onEvent, { forceFresh = false, clarificationChoice, clarificationText, refinedQuestion, threadId = null, pinnedTableIds = [], signal = null } = {}) => {
     const res = await fetch(`${BASE}/projects/${id}/ask/stream`, {
       method: "POST",
       headers: headers(true),
+      signal: signal || undefined,
       body: JSON.stringify({
         question,
         thread_id: threadId,
@@ -296,31 +313,13 @@ export const api = {
       } catch (_) {}
       throw new Error(detail);
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResult = null;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() || "";
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data: ")) continue;
-        const event = JSON.parse(line.slice(6));
-        onEvent?.(event);
-        if (event.type === "complete") finalResult = event;
-        if (event.type === "error") throw new Error(event.message || "Ask failed");
-      }
-    }
-    return finalResult;
+    return readAskSse(res, onEvent, signal);
   },
-  askConfirmStream: async (id, question, sql, onEvent, { threadId = null } = {}) => {
+  askConfirmStream: async (id, question, sql, onEvent, { threadId = null, signal = null } = {}) => {
     const res = await fetch(`${BASE}/projects/${id}/ask/confirm/stream`, {
       method: "POST",
       headers: headers(true),
+      signal: signal || undefined,
       body: JSON.stringify({ question, sql, thread_id: threadId }),
     });
     if (handleUnauthorized(res)) {
@@ -333,26 +332,7 @@ export const api = {
       } catch (_) {}
       throw new Error(detail);
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResult = null;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() || "";
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data: ")) continue;
-        const event = JSON.parse(line.slice(6));
-        onEvent?.(event);
-        if (event.type === "complete") finalResult = event;
-        if (event.type === "error") throw new Error(event.message || "Ask failed");
-      }
-    }
-    return finalResult;
+    return readAskSse(res, onEvent, signal);
   },
 
   getDashboard: (id, refresh = false, inputOverrides = null) => {

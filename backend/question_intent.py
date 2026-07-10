@@ -15,7 +15,10 @@ _EXPLAIN = re.compile(
     re.I,
 )
 _REF_PRIOR = re.compile(
-    r"\b(this|that|it|them|these|those|above|previous|last|prior|earlier|your answer|the \d+)\b",
+    r"\b("
+    r"this|that|it|them|their|these|those|above|previous|last|prior|earlier|"
+    r"your answer|the \d+|same\s+(?:ones?|users?|students?|rows?|results?)"
+    r")\b",
     re.I,
 )
 _DATA_SIGNAL = re.compile(
@@ -31,9 +34,10 @@ _DATA_SIGNAL = re.compile(
 _DRILL_DOWN = re.compile(
     r"\b("
     r"(give|get|show|list|fetch|pull|provide|display|return)\s+.{0,40}\b("
-    r"uid|user_id|user ids?|ids?|names?|emails?|records?|rows?|details?|breakdown"
+    r"uid|user_?ids?|userids?|ids?|names?|emails?|records?|rows?|details?|breakdown"
     r")\b|"
-    r"\b(uid|user_id|user ids?|ids?)\b.{0,30}\b(for|of|from)\b.{0,20}\b(those|these|them|that|the)\b"
+    r"\b(uid|user_?ids?|userids?|ids?)\b.{0,30}\b(for|of|from)\b.{0,20}"
+    r"\b(those|these|them|their|that|the)\b"
     r")\b",
     re.I,
 )
@@ -255,27 +259,163 @@ def question_asks_growth_cycle_count(question: str) -> bool:
 
 def is_drill_down_data_request(question: str) -> bool:
     """Follow-up that needs new SQL (e.g. 'give uid for those 6'), not cache/explain."""
-    q = (question or "").strip()
+    q = expand_question_abbreviations((question or "").strip())
     if not q:
         return False
     if _DRILL_DOWN.search(q):
         return True
-    # Short follow-ups like «give with user id» / «give user ids»
+    # Short follow-ups like «give with user id» / «show their userid»
     if re.search(
-        r"\b(give|get|show|list|fetch|provide|return)\b.{0,30}\b"
-        r"(uid|user[_\s]?id|user ids?|ids?)\b",
+        r"\b(give|get|show|list|fetch|provide|return)\b.{0,40}\b"
+        r"(uid|user[_\s]?ids?|userids?|ids?)\b",
         q,
         re.I,
     ):
         return True
     if _REF_PRIOR.search(q) and re.search(
-        r"\b(uid|user_id|user ids?|ids?|names?|emails?|who|which|details?|rows?)\b",
+        r"\b(uid|user_?ids?|userids?|ids?|names?|emails?|who|which|details?|rows?)\b",
         q,
         re.I,
     ):
-        if re.search(r"\b(give|get|show|list|fetch|provide)\b", q, re.I):
+        if re.search(r"\b(give|get|show|list|fetch|provide|return)\b", q, re.I):
             return True
+    # «their user ids» / «those students' ids» without an explicit verb
+    if re.search(
+        r"\b(their|those|these|them)\b.{0,20}\b(uid|user_?ids?|userids?)\b",
+        q,
+        re.I,
+    ):
+        return True
     return False
+
+
+_PAGE_NEXT = re.compile(
+    r"\b("
+    r"next\s+page|show\s+more|more\s+(?:ids?|rows?|results?|users?)|"
+    r"load\s+more|continue|another\s+page|following\s+page"
+    r")\b",
+    re.I,
+)
+_PAGE_NUM = re.compile(
+    r"\b(?:page\s*[=:]?\s*|p(?:g)?\s*)(\d+)\b|"
+    r"\b(?:offset\s*[=:]?\s*)(\d+)\b|"
+    r"\bnext\s+(\d+)\b",
+    re.I,
+)
+
+
+def _drill_page_size(requested: int | None = None) -> int:
+    try:
+        import config
+
+        default = int(getattr(config, "DRILL_DOWN_PAGE_SIZE", 500) or 500)
+        cap = int(getattr(config, "DRILL_DOWN_MAX_PAGE_SIZE", 2000) or 2000)
+    except Exception:
+        default, cap = 500, 2000
+    size = int(requested) if requested and requested > 0 else default
+    return max(1, min(size, cap))
+
+
+def is_list_pagination_request(question: str) -> bool:
+    """True for «next page» / «show more» / «page 2» on a prior id list."""
+    q = expand_question_abbreviations((question or "").strip())
+    if not q:
+        return False
+    if _PAGE_NEXT.search(q):
+        return True
+    if _PAGE_NUM.search(q) and (
+        re.search(r"\b(page|offset|more|next)\b", q, re.I)
+        or len(q.split()) <= 6
+    ):
+        return True
+    return False
+
+
+def parse_list_page_request(question: str, *, prior_sql: str = "") -> dict:
+    """
+    Resolve which page of a user-id list to fetch.
+    Returns {page, page_size, next_page} (page is 1-based).
+    """
+    q = expand_question_abbreviations((question or "").strip())
+    page_size = _drill_page_size()
+    # «next 1000» / explicit size
+    m_size = re.search(r"\b(?:next|show|get|fetch)\s+(\d{2,4})\b", q, re.I)
+    if m_size:
+        page_size = _drill_page_size(int(m_size.group(1)))
+
+    prior_limit, prior_offset = extract_sql_limit_offset(prior_sql)
+    if prior_limit:
+        page_size = _drill_page_size(prior_limit)
+
+    if _PAGE_NEXT.search(q):
+        cur_page = (prior_offset // page_size) + 1 if page_size else 1
+        return {"page": cur_page + 1, "page_size": page_size, "next_page": True}
+
+    m = _PAGE_NUM.search(q)
+    if m:
+        if m.group(1):
+            return {"page": max(1, int(m.group(1))), "page_size": page_size, "next_page": False}
+        if m.group(2):
+            offset = max(0, int(m.group(2)))
+            page = (offset // page_size) + 1 if page_size else 1
+            return {"page": page, "page_size": page_size, "next_page": False}
+        if m.group(3):
+            page_size = _drill_page_size(int(m.group(3)))
+            cur_page = (prior_offset // page_size) + 1 if page_size else 1
+            return {"page": cur_page + 1, "page_size": page_size, "next_page": True}
+
+    return {"page": 1, "page_size": page_size, "next_page": False}
+
+
+def extract_sql_limit_offset(sql: str) -> tuple[int | None, int]:
+    """Return (limit, offset) from a SELECT; offset defaults to 0."""
+    text = (sql or "").strip().rstrip(";")
+    if not text:
+        return None, 0
+    # LIMIT n OFFSET m  OR  LIMIT m, n (MySQL-style — rare in BQ)
+    m = re.search(
+        r"\bLIMIT\s+(\d+)\s+OFFSET\s+(\d+)\s*$",
+        text,
+        re.I,
+    )
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.search(r"\bLIMIT\s+(\d+)\s*,\s*(\d+)\s*$", text, re.I)
+    if m:
+        return int(m.group(2)), int(m.group(1))
+    m = re.search(r"\bLIMIT\s+(\d+)\s*$", text, re.I)
+    if m:
+        return int(m.group(1)), 0
+    m_off = re.search(r"\bOFFSET\s+(\d+)\s*$", text, re.I)
+    if m_off:
+        return None, int(m_off.group(1))
+    return None, 0
+
+
+def is_user_id_list_sql(sql: str) -> bool:
+    text = (sql or "").strip()
+    if not text:
+        return False
+    if re.search(r"\bCOUNT\s*\(", text, re.I):
+        return False
+    return bool(re.search(r"SELECT\s+DISTINCT\s+[`\"]?user_id", text, re.I))
+
+
+def apply_list_pagination(sql: str, *, page: int = 1, page_size: int | None = None) -> str:
+    """Replace/add ORDER BY + LIMIT/OFFSET on a list SELECT."""
+    text = (sql or "").strip().rstrip(";")
+    if not text:
+        return text
+    size = _drill_page_size(page_size)
+    page = max(1, int(page or 1))
+    offset = (page - 1) * size
+    # Strip existing ORDER BY / LIMIT / OFFSET tail
+    body = re.sub(r"\bORDER\s+BY\b[\s\S]*$", "", text, flags=re.I).strip()
+    body = re.sub(r"\bLIMIT\s+\d+(?:\s*,\s*\d+)?(?:\s+OFFSET\s+\d+)?\s*$", "", body, flags=re.I).strip()
+    body = re.sub(r"\bOFFSET\s+\d+\s*$", "", body, flags=re.I).strip()
+    return (
+        f"{body}\nORDER BY `user_id`\nLIMIT {size} OFFSET {offset}"
+    )
 
 
 def expand_drill_down_followup(
@@ -287,17 +427,20 @@ def expand_drill_down_followup(
     Turn «give with user id» into an explicit list request that reuses prior filters.
     """
     q = expand_question_abbreviations((question or "").strip())
-    if not is_drill_down_data_request(q):
+    if not is_drill_down_data_request(q) and not is_list_pagination_request(q):
         return q
     if not (prior_sql or "").strip() and not (prior_question or "").strip():
         return q
 
+    page_info = parse_list_page_request(q, prior_sql=prior_sql)
+    page = page_info["page"]
+    page_size = page_info["page_size"]
     topic = (prior_question or "").strip() or "the previous result"
     parts = [
         f"List distinct user_id for: {topic}.",
         "Reuse the SAME table and WHERE filters as the prior query.",
         "SELECT DISTINCT user_id (not COUNT).",
-        "LIMIT 500.",
+        f"Paginate with LIMIT {page_size} OFFSET {(page - 1) * page_size} (page {page}).",
     ]
     if prior_sql.strip():
         try:
@@ -312,20 +455,42 @@ def expand_drill_down_followup(
     return " ".join(parts)
 
 
-def rewrite_aggregate_to_user_list_sql(prior_sql: str) -> str | None:
+def rewrite_aggregate_to_user_list_sql(
+    prior_sql: str,
+    *,
+    page: int = 1,
+    page_size: int | None = None,
+) -> str | None:
     """
     Convert a prior COUNT(DISTINCT user_id) query into SELECT DISTINCT user_id
-    keeping the same FROM/WHERE. Returns None if prior SQL is not a simple aggregate.
+    keeping the same FROM/WHERE. Supports LIMIT/OFFSET pagination.
+    If prior_sql is already a user_id list, re-page it instead.
     """
     sql = (prior_sql or "").strip().rstrip(";")
     if not sql:
         return None
-    # Must be a count aggregate over user_id
-    if not re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+[`\"]?user_id[`\"]?\s*\)", sql, re.I):
-        if not re.search(r"\bCOUNT\s*\(\s*\*\s*\)", sql, re.I):
-            return None
-    # Already a list query
-    if re.search(r"SELECT\s+DISTINCT\s+[`\"]?user_id", sql, re.I):
+
+    size = _drill_page_size(page_size)
+    page = max(1, int(page or 1))
+
+    # Already a list query → just change page (next page / page N)
+    if is_user_id_list_sql(sql):
+        return apply_list_pagination(sql, page=page, page_size=size)
+
+    # Must be a count aggregate (user_id / * / 1) — not already a list
+    is_count = bool(
+        re.search(
+            r"\bCOUNT\s*\(\s*(?:DISTINCT\s+)?[`\"]?user_id[`\"]?\s*\)",
+            sql,
+            re.I,
+        )
+        or re.search(r"\bCOUNT\s*\(\s*(?:\*|1)\s*\)", sql, re.I)
+        or re.search(r"\bCOUNT\s*\(\s*DISTINCT\s+[^)]+\)", sql, re.I)
+    )
+    if not is_count:
+        return None
+    # Multi-dimension GROUP BY aggregates are not safe to rewrite blindly
+    if re.search(r"\bGROUP\s+BY\b", sql, re.I):
         return None
 
     from_m = re.search(r"\bFROM\b", sql, re.I)
@@ -334,8 +499,12 @@ def rewrite_aggregate_to_user_list_sql(prior_sql: str) -> str | None:
     tail = sql[from_m.start() :]
     # Drop trailing ORDER BY / LIMIT from aggregate (we'll add our own LIMIT)
     tail = re.sub(r"\bORDER\s+BY\b[\s\S]*$", "", tail, flags=re.I).strip()
-    tail = re.sub(r"\bLIMIT\s+\d+\s*$", "", tail, flags=re.I).strip()
-    return f"SELECT DISTINCT `user_id`\n{tail}\nORDER BY `user_id`\nLIMIT 500"
+    tail = re.sub(r"\bLIMIT\s+\d+(?:\s+OFFSET\s+\d+)?\s*$", "", tail, flags=re.I).strip()
+    offset = (page - 1) * size
+    return (
+        f"SELECT DISTINCT `user_id`\n{tail}\n"
+        f"ORDER BY `user_id`\nLIMIT {size} OFFSET {offset}"
+    )
 
 
 def detect_intent(question: str, *, has_thread_history: bool) -> str:
@@ -357,8 +526,10 @@ def detect_intent(question: str, *, has_thread_history: bool) -> str:
     if question_wants_breakdown(expanded):
         return "data_query"
 
-    # Drill-downs always need fresh SQL, even when referencing prior results.
-    if has_thread_history and is_drill_down_data_request(q):
+    # Drill-downs / list pagination always need fresh SQL, even when referencing prior results.
+    if has_thread_history and (
+        is_drill_down_data_request(q) or is_list_pagination_request(q)
+    ):
         return "data_query"
 
     if has_thread_history and _EXPLAIN.search(q):

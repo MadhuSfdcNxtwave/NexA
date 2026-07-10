@@ -843,9 +843,26 @@ def build_presentation(
 ) -> tuple[list[dict], dict, str]:
     """Chart spec + dashboard prep + business-friendly analysis."""
     from chart_prepare import prepare_chart
-    from presentation import infer_chart_spec, merge_chart_specs
+    from presentation import (
+        analyze_user_id_list,
+        infer_chart_spec,
+        is_user_id_list_result,
+        merge_chart_specs,
+    )
 
     sample = sample if sample is not None else rows[:50]
+
+    # Drill-down id lists: deterministic write-up (avoid count-style LLM fluff).
+    if is_user_id_list_result(columns, rows, sql=sql, question=question):
+        chart_spec = {
+            "chart": "none",
+            "title": f"{len(rows):,} user ids",
+            "prefer_table": True,
+        }
+        viz_rows, chart_spec = prepare_chart(rows, columns, chart_spec, question)
+        analysis = analyze_user_id_list(question, columns, rows, sql=sql)
+        return viz_rows, chart_spec, analysis
+
     fallback_spec = infer_chart_spec(question, columns, rows)
     if config.PRESENTATION_MODE == "hex":
         chart_spec = merge_chart_specs({}, fallback_spec)

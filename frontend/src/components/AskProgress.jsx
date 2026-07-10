@@ -10,6 +10,19 @@ const STAGES = [
   { key: "answer", label: "Preparing your answer" },
 ];
 
+function selectedTableNames(progress) {
+  if (!progress) return [];
+  const viewed = progress.viewedTables || [];
+  if (viewed.length) {
+    return viewed.map((t) => t.short_name || t.full_table_id?.split(".").pop() || String(t));
+  }
+  const selected = (progress.tables || []).filter((t) => t.selected);
+  if (selected.length) {
+    return selected.map((t) => t.short_name || t.full_table_id?.split(".").pop() || String(t));
+  }
+  return [];
+}
+
 function stageIndex(progress) {
   if (!progress) return 0;
   const { phase, tables = [], viewedTables = [], matchedColumns = [] } = progress;
@@ -26,11 +39,12 @@ function stageIndex(progress) {
 
 function stageDetail(progress, key) {
   if (!progress) return null;
-  const { tables = [], viewedTables = [], matchedColumns = [], joinRelations = [] } = progress;
+  const { matchedColumns = [], joinRelations = [] } = progress;
+  const names = selectedTableNames(progress);
 
   if (key === "tables") {
-    const n = viewedTables.length || tables.length;
-    if (n > 0) return `${n} table${n === 1 ? "" : "s"} in scope`;
+    if (names.length === 1) return names[0];
+    if (names.length > 1) return `${names.length} tables locked`;
   }
   if (key === "columns") {
     if (matchedColumns.length) return `${matchedColumns.length} table${matchedColumns.length === 1 ? "" : "s"} mapped`;
@@ -45,10 +59,35 @@ function stageDetail(progress, key) {
 /** Friendly one-liner for banners and compact views. */
 export function getFriendlyStageLabel(progress) {
   if (!progress) return "Processing your question…";
+  const names = selectedTableNames(progress);
+  if (names.length) {
+    const tableBit = names.length === 1 ? names[0] : names.slice(0, 2).join(", ");
+    const idx = stageIndex(progress);
+    if (idx <= 1) return `Using table: ${tableBit}`;
+    const stage = STAGES[idx] || STAGES[0];
+    return `${stage.label} · ${tableBit}`;
+  }
   const idx = stageIndex(progress);
   const stage = STAGES[idx] || STAGES[0];
   const detail = stageDetail(progress, stage.key);
   return detail ? `${stage.label} · ${detail}` : stage.label;
+}
+
+function TableChips({ names, reason }) {
+  if (!names?.length) return null;
+  return (
+    <div className="ask-selected-tables">
+      <span className="ask-selected-tables-label">Using table{names.length === 1 ? "" : "s"}</span>
+      <div className="ask-selected-table-chips">
+        {names.map((name) => (
+          <code key={name} className="ask-selected-table-chip" title={name}>
+            {name}
+          </code>
+        ))}
+      </div>
+      {reason ? <p className="ask-selected-tables-reason muted">{reason}</p> : null}
+    </div>
+  );
 }
 
 function StageRow({ stage, state, detail, active }) {
@@ -69,10 +108,12 @@ function StageRow({ stage, state, detail, active }) {
   );
 }
 
-/** Engaging staged progress — no raw routing / join-hint dumps. */
+/** Engaging staged progress — shows locked table name(s) clearly. */
 export default function AskProgress({ progress, active, compact = false }) {
   const currentIdx = useMemo(() => stageIndex(progress), [progress]);
   const headline = getFriendlyStageLabel(progress);
+  const tableNames = useMemo(() => selectedTableNames(progress), [progress]);
+  const routingReason = progress?.routingReason || "";
 
   if (!progress) return null;
 
@@ -80,7 +121,10 @@ export default function AskProgress({ progress, active, compact = false }) {
     return (
       <div className={`ask-progress-compact ${active ? "active" : ""}`} role="status" aria-live="polite">
         {active && <span className="ask-stage-spinner" aria-hidden />}
-        <span className="ask-progress-compact-label">{headline}</span>
+        <div className="ask-progress-compact-body">
+          <span className="ask-progress-compact-label">{headline}</span>
+          <TableChips names={tableNames} reason={routingReason} />
+        </div>
         <div className="ask-progress-dots" aria-hidden>
           {STAGES.map((s, i) => (
             <span
@@ -99,6 +143,8 @@ export default function AskProgress({ progress, active, compact = false }) {
         {active && <span className="ask-stage-spinner" aria-hidden />}
         <span className="ask-progress-title">{active ? "Working on it…" : "Done"}</span>
       </div>
+
+      <TableChips names={tableNames} reason={routingReason} />
 
       <div className="ask-progress-stages">
         {STAGES.map((stage, i) => {

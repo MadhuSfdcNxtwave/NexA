@@ -98,3 +98,11 @@ export function IconBell() {
     </svg>
   );
 }
+
+export function IconStop() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" aria-hidden>
+      <rect x="5" y="5" width="10" height="10" rx="1.5" />
+    </svg>
+  );
+}

@@ -149,14 +149,14 @@ def _compose_placement(
     plan: AgentPlan,
     tables: list[Any],
 ) -> str | None:
-    from question_dates import date_filter_sql, pick_date_column, resolve_relative_range
+    from question_dates import date_filter_sql, pick_date_column, resolve_question_date_range
 
     table = _find_table(tables, "placements_details")
     if not table:
         return None
     fq = table.full_table_id
     where: list[str] = []
-    rel = resolve_relative_range(question)
+    rel = resolve_question_date_range(question)
     date_col = pick_date_column(table) or "date_of_placement"
     if rel:
         where.append(date_filter_sql(date_col, rel[0], rel[1]))
@@ -213,11 +213,16 @@ def run_temp_query_agent(
     columns_by_table = columns_by_table or {}
     plan = plan_question(question)
 
-    # Drill-down from prior aggregate
+    # Drill-down from prior aggregate (paginated)
     if plan.needs_list and prior_sql:
-        from question_intent import rewrite_aggregate_to_user_list_sql
+        from question_intent import parse_list_page_request, rewrite_aggregate_to_user_list_sql
 
-        sql = rewrite_aggregate_to_user_list_sql(prior_sql)
+        page_info = parse_list_page_request(question, prior_sql=prior_sql)
+        sql = rewrite_aggregate_to_user_list_sql(
+            prior_sql,
+            page=page_info["page"],
+            page_size=page_info["page_size"],
+        )
         if sql:
             return AgentResult(sql=sql, reason=plan.reason, plan=plan, source="temp_agent_drill")
 

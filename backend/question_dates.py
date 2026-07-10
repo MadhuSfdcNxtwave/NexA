@@ -89,6 +89,42 @@ def resolve_relative_range(question: str, *, today: date | None = None) -> tuple
     return None
 
 
+def resolve_calendar_year_range(
+    question: str,
+    *,
+    today: date | None = None,
+) -> tuple[date, date] | None:
+    """Map explicit years like «in 2026» / «for 2026» to a calendar year range.
+
+    If a month is also present (e.g. «June 2026»), return that month only.
+    """
+    year = _year_from_question(question)
+    if year is None:
+        return None
+    ref = today or date.today()
+    month = _month_from_question(question)
+    if month:
+        last = calendar.monthrange(year, month)[1]
+        return date(year, month, 1), date(year, month, last)
+    # Full calendar year; if asking about the current year, end at today.
+    start = date(year, 1, 1)
+    end = date(year, 12, 31)
+    if year == ref.year:
+        end = min(end, ref)
+    return start, end
+
+
+def resolve_question_date_range(
+    question: str,
+    *,
+    today: date | None = None,
+) -> tuple[date, date] | None:
+    """Relative phrases first, then explicit calendar year/month."""
+    return resolve_relative_range(question, today=today) or resolve_calendar_year_range(
+        question, today=today
+    )
+
+
 def _month_from_question(question: str) -> int | None:
     q = question.lower()
     for i, name in enumerate(_MONTHS, 1):

@@ -19,7 +19,8 @@ _TRIVIAL_SQL = re.compile(
     re.I,
 )
 _REF_PRIOR = re.compile(
-    r"\b(this|that|it|them|these|those|above|previous|last answer|same data|prior)\b",
+    r"\b(this|that|it|them|their|these|those|above|previous|last answer|same data|prior|"
+    r"same\s+(?:ones?|users?|students?|rows?|results?))\b",
     re.I,
 )
 _VIZ_FOLLOWUP = re.compile(
@@ -248,12 +249,16 @@ def needs_fresh_query(question: str, entries: list[dict[str, Any]]) -> bool:
     True when the question needs new BigQuery SQL, not cache or explain.
     E.g. prior answer was COUNT(*) and user asks 'give uid for those 6'.
     """
-    from question_intent import is_drill_down_data_request, question_wants_breakdown
+    from question_intent import (
+        is_drill_down_data_request,
+        is_list_pagination_request,
+        question_wants_breakdown,
+    )
 
     if question_wants_breakdown(question):
         return True
 
-    if is_drill_down_data_request(question):
+    if is_drill_down_data_request(question) or is_list_pagination_request(question):
         return True
 
     if is_time_series_question(question):

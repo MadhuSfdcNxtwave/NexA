@@ -50,7 +50,9 @@ _TOPIC_CHANGE = re.compile(
 _CONTINUITY = re.compile(
     r"\b("
     r"raw|csv|export|field[-\s]?wise|data\s+table|tabular|"
-    r"same\s+(?:data|table|query)|those\s+rows?|that\s+data|"
+    r"same\s+(?:data|table|query|ones?|users?|students?|rows?|results?)|"
+    r"those\s+(?:rows?|users?|students?)|that\s+data|their\s+(?:ids?|user|"
+    r"userids?|details?)|"
     r"just\s+give|only\s+(?:the\s+)?(?:raw|data|rows?|table)|"
     r"more\s+columns?|all\s+fields?|full\s+(?:data|rows?)"
     r")\b",
@@ -107,6 +109,10 @@ def is_thread_continuity_followup(question: str, *, prior_sql: str = "") -> bool
     q = expand_question_abbreviations((question or "").strip())
     if not q:
         return False
+    from question_intent import is_drill_down_data_request, is_list_pagination_request
+
+    if is_drill_down_data_request(q) or is_list_pagination_request(q):
+        return True
     if _TOPIC_CHANGE.search(q) and not _CONTINUITY.search(q):
         # Explicit new domain — do not lock.
         if re.search(r"\b(nps|placement|attendance|portal)\b", q, re.I):
@@ -124,6 +130,13 @@ def is_thread_continuity_followup(question: str, *, prior_sql: str = "") -> bool
 
 def detect_answer_shape(question: str, *, prior_sql: str = "") -> AnswerShape:
     q = expand_question_abbreviations((question or "").strip())
+    from question_intent import is_drill_down_data_request
+
+    if prior_sql and is_drill_down_data_request(q):
+        return AnswerShape(
+            mode="auto",
+            reason="Drill-down — list ids/rows using prior filters (not a new aggregate)",
+        )
     if wants_raw_tabular_data(q):
         return AnswerShape(mode="raw", reason="User asked for raw/field-wise/CSV-ready rows")
     if wants_aggregate_metric(q):

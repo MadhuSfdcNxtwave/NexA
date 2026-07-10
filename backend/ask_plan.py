@@ -522,13 +522,14 @@ def build_ask_plan(
     matches.sort(key=lambda m: (-m.score, m.short_name.lower()))
 
     prior_table_ids = _tables_from_prior_sql(prior_sql, included)
-    from question_intent import is_drill_down_data_request
+    from question_intent import is_drill_down_data_request, is_list_pagination_request
     from agents.answer_shape import is_thread_continuity_followup, detect_answer_shape
 
     is_followup = (
         question_is_breakdown_followup(question, prior_sql=prior_sql)
         or (bool(prior_sql) and question_wants_breakdown(question))
         or (bool(prior_sql) and is_drill_down_data_request(question))
+        or (bool(prior_sql) and is_list_pagination_request(question))
         or is_thread_continuity_followup(question, prior_sql=prior_sql)
     )
     answer_shape = detect_answer_shape(question, prior_sql=prior_sql)

@@ -744,11 +744,9 @@ def _ask_thread_stream_impl(body: schemas.AskRequest, thread_id: int, db: Sessio
     included = _included_tables(db, None)
     ws_hints = get_workspace_join_hints(db)
     memory_text = _thread_context_for_ask(db, t.id, ws_hints, body.question)
-    cache_entries = (
-        _cache_entries_for_thread(db, t.id)
-        if not body.force_fresh
-        else []
-    )
+    # Always load thread cache for conversational continuity (prior SQL / table).
+    # force_fresh only skips reusing cached *answers*, not thread memory.
+    cache_entries = _cache_entries_for_thread(db, t.id)
 
     if not included:
         def empty_tables():
@@ -2052,12 +2050,14 @@ def _project_context_for_ask(
     )
 
 
-def _cache_entries_for_project(db: Session, project_id: int) -> list[dict]:
+def _cache_entries_for_project(
+    db: Session, project_id: int, thread_id: int | None = None
+) -> list[dict]:
+    mem_q = select(Memory).where(Memory.project_id == project_id)
+    if thread_id is not None:
+        mem_q = mem_q.where(Memory.thread_id == thread_id)
     memories = db.scalars(
-        select(Memory)
-        .where(Memory.project_id == project_id)
-        .order_by(Memory.created_at.desc())
-        .limit(config.CACHE_LOOKUP_SIZE)
+        mem_q.order_by(Memory.created_at.desc()).limit(config.CACHE_LOOKUP_SIZE)
     ).all()
     cell_runs = notebook_api.latest_cell_runs(db, project_id)
     return build_cache_entries(list(reversed(memories)), cell_runs)
@@ -2398,11 +2398,9 @@ def ask(
     memory_text = _project_context_for_ask(
         db, project_id, ws_hints, body.question, thread_id=thread.id
     )
-    cache_entries = (
-        _cache_entries_for_project(db, project_id)
-        if not body.force_fresh
-        else []
-    )
+    # Always load this thread's cache for prior SQL continuity.
+    # force_fresh only controls answer reuse (reuse_cached), not memory.
+    cache_entries = _cache_entries_for_project(db, project_id, thread_id=thread.id)
     try:
         result = None
         audit = SqlAuditContext(db=db, project_id=project_id, user_id=user.id)
@@ -2457,11 +2455,8 @@ def ask_stream(
         db, project_id, ws_hints, body.question, thread_id=thread.id
     )
     join_hints = ws_hints
-    cache_entries = (
-        _cache_entries_for_project(db, project_id)
-        if not body.force_fresh
-        else []
-    )
+    # Always load this thread's cache for prior SQL continuity.
+    cache_entries = _cache_entries_for_project(db, project_id, thread_id=thread.id)
 
     if not included:
         def empty_tables():

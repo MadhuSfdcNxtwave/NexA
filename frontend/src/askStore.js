@@ -3,6 +3,7 @@
 const listeners = new Set();
 
 let job = null;
+let abortController = null;
 
 function emit() {
   listeners.forEach((fn) => {
@@ -25,6 +26,14 @@ export function subscribeAskJob(fn) {
 }
 
 export function startAskJob({ projectId, threadId, question, standalone = false }) {
+  if (abortController) {
+    try {
+      abortController.abort();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  abortController = new AbortController();
   job = {
     projectId: projectId != null ? Number(projectId) : null,
     threadId: threadId != null ? Number(threadId) : null,
@@ -41,6 +50,26 @@ export function startAskJob({ projectId, threadId, question, standalone = false 
     error: null,
   };
   emit();
+  return abortController;
+}
+
+export function getAskAbortSignal() {
+  return abortController?.signal || null;
+}
+
+/** Cancel the in-flight Ask stream (Stop button). */
+export function stopAskJob() {
+  if (abortController) {
+    try {
+      abortController.abort();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  if (job) {
+    job = { ...job, loading: false, error: "Stopped" };
+    emit();
+  }
 }
 
 export function updateAskJobProgress(progress) {
@@ -62,6 +91,7 @@ export function updateAskJobThread(threadId) {
 }
 
 export function finishAskJob() {
+  abortController = null;
   job = null;
   emit();
 }

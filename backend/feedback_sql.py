@@ -460,6 +460,7 @@ def _build_raw_export_sql(fq: str, cols: set[str], question: str) -> str:
         "user_id",
         "feedback_id",
         "feedback_trigger",
+        "feedback_type",
         "question_id",
         "question_order",
         "question_type",
@@ -471,10 +472,14 @@ def _build_raw_export_sql(fq: str, cols: set[str], question: str) -> str:
         "is_valid_question",
         "is_valid_trigger",
     ]
+    # Only select columns that actually exist on the table.
     select_cols = [c for c in preferred if c in cols]
     if not select_cols:
-        # Fall back to a safe subset of known names present on the table.
-        select_cols = sorted(c for c in cols if c in preferred or c.endswith("_id") or "text" in c or "answer" in c)[:16]
+        select_cols = sorted(
+            c
+            for c in cols
+            if c in preferred or c.endswith("_id") or "text" in c or "answer" in c or "trigger" in c
+        )[:16]
     if not select_cols:
         select_cols = ["*"]
 
@@ -491,7 +496,6 @@ def _build_raw_export_sql(fq: str, cols: set[str], question: str) -> str:
             f"AND LAST_DAY(CURRENT_DATE(), MONTH)"
         )
     elif date_col:
-        # Still prefer recent data for unbounded "details" dumps.
         try:
             from question_dates import resolve_relative_range
 
