@@ -517,6 +517,42 @@ def resolve_user_name_source(
     return fq, sorted(names), on_sql
 
 
+_ENRICHMENT_MARKERS = (
+    "profile_basic_details",
+    "profile_education_details",
+)
+
+
+def is_name_enrichment_table(full_or_short: str) -> bool:
+    short = (full_or_short or "").rsplit(".", 1)[-1].lower()
+    return any(m in short for m in _ENRICHMENT_MARKERS)
+
+
+def _retarget_fact_table(sql: str, fact_fq: str) -> str:
+    """Point the primary FROM (or innermost list subquery FROM) at fact_fq."""
+    text = (sql or "").strip()
+    if not text or not fact_fq:
+        return text
+    short = fact_fq.rsplit(".", 1)[-1].lower()
+    if short in text.lower() and fact_fq.lower() in text.lower().replace("`", ""):
+        return text
+    # Prefer innermost FROM `...` inside a user_id subquery
+    inner = re.search(
+        r"(FROM\s*\(\s*SELECT\s+DISTINCT\s+`?user_id`?\s+FROM\s+)(`[^`]+`)",
+        text,
+        flags=re.I,
+    )
+    if inner:
+        return text[: inner.start(2)] + f"`{fact_fq}`" + text[inner.end(2) :]
+    return re.sub(
+        r"(FROM\s+)(`[^`]+`)",
+        rf"\1`{fact_fq}`",
+        text,
+        count=1,
+        flags=re.I,
+    )
+
+
 def _user_id_hyphen_expr(source_sql: str, *, prefer_sql: str | None = None) -> str:
     """BigQuery expr: UUID with hyphens (8-4-4-4-12) from a user_id value.
 
@@ -695,13 +731,18 @@ def rewrite_aggregate_to_user_list_sql(
     question: str = "",
     included_tables: list | None = None,
     columns_by_table: dict[str, set[str]] | None = None,
+    force_fact_fq: str | None = None,
 ) -> str | None:
     """
     Convert a prior COUNT(DISTINCT user_id) query into SELECT DISTINCT user_id
     keeping the same FROM/WHERE. Supports LIMIT/OFFSET pagination.
     When the question asks for names and the fact table has none, JOIN
     academy_user_profile_basic_details (or master) for first_name/last_name.
+
+    force_fact_fq: thread-locked fact table — keep it even if prior_sql drifted.
     """
+    from sql_parse import normalize_user_id_joins
+
     sql = (prior_sql or "").strip().rstrip(";")
     if not sql:
         return None
@@ -709,30 +750,30 @@ def rewrite_aggregate_to_user_list_sql(
     size = _drill_page_size(page_size)
     page = max(1, int(page or 1))
     wants_names = question_wants_user_names(question)
+    force_fq = (force_fact_fq or "").strip() or None
 
     # Already a list query → re-page; optionally add names if missing
     if is_user_id_list_sql(sql):
+        if force_fq:
+            sql = _retarget_fact_table(sql, force_fq)
         base = apply_list_pagination(sql, page=page, page_size=size)
+        base = normalize_user_id_joins(base)
         if not wants_names:
             return _enrich_user_list_with_hyphen_column(base)
         if re.search(r"[`\"]?(user_name|first_name|last_name)[`\"]?", base, re.I):
-            return base
-        # Strip pagination, wrap with names, re-apply page
+            return normalize_user_id_joins(base)
         bare = re.sub(r"\bORDER\s+BY\b[\s\S]*$", "", base, flags=re.I).strip()
         bare = re.sub(r"\bLIMIT\s+\d+(?:\s+OFFSET\s+\d+)?\s*$", "", bare, flags=re.I).strip()
-        # Ensure bare is a simple user_id select for wrapping
-        if not re.search(r"SELECT\s+DISTINCT\s+[`\"]?user_id[`\"]?\s*$", bare.split("\n")[0], re.I):
-            # Extract fact table from prior for name source
-            pass
-        fact_fq = ""
+        if force_fq:
+            bare = _retarget_fact_table(bare, force_fq)
+        fact_fq = force_fq or ""
         m_fq = re.search(r"FROM\s+`([^`]+)`", bare, re.I)
-        if m_fq:
+        if m_fq and not fact_fq:
             fact_fq = m_fq.group(1)
         name_fq, name_cols, join_on = resolve_user_name_source(
             fact_fq, columns_by_table, included_tables
         )
         if name_fq and name_cols:
-            # Reduce to user_id-only subquery if the list already has only user_id
             if re.search(r"SELECT\s+DISTINCT\s+[`\"]?user_id[`\"]?", bare, re.I) and not re.search(
                 r"SELECT\s+DISTINCT\s+[`\"]?user_id[`\"]?\s*,", bare, re.I
             ):
@@ -746,7 +787,6 @@ def rewrite_aggregate_to_user_list_sql(
                 )
         return _enrich_user_list_with_hyphen_column(base)
 
-    # Must be a count aggregate (user_id / * / 1) — not already a list
     is_count = bool(
         re.search(
             r"\bCOUNT\s*\(\s*(?:DISTINCT\s+)?[`\"]?user_id[`\"]?\s*\)",
@@ -758,7 +798,6 @@ def rewrite_aggregate_to_user_list_sql(
     )
     if not is_count:
         return None
-    # Multi-dimension GROUP BY aggregates are not safe to rewrite blindly
     if re.search(r"\bGROUP\s+BY\b", sql, re.I):
         return None
 
@@ -766,9 +805,16 @@ def rewrite_aggregate_to_user_list_sql(
     if not from_m:
         return None
     tail = sql[from_m.start() :]
-    # Drop trailing ORDER BY / LIMIT from aggregate (we'll add our own LIMIT)
     tail = re.sub(r"\bORDER\s+BY\b[\s\S]*$", "", tail, flags=re.I).strip()
     tail = re.sub(r"\bLIMIT\s+\d+(?:\s+OFFSET\s+\d+)?\s*$", "", tail, flags=re.I).strip()
+    if force_fq:
+        tail = re.sub(
+            r"(FROM\s+)(`[^`]+`)",
+            rf"\1`{force_fq}`",
+            tail,
+            count=1,
+            flags=re.I,
+        )
     offset = (page - 1) * size
     base = (
         f"SELECT DISTINCT `user_id`\n{tail}\n"
@@ -778,14 +824,13 @@ def rewrite_aggregate_to_user_list_sql(
     if not wants_names:
         return _enrich_user_list_with_hyphen_column(base)
 
-    fact_fq = ""
+    fact_fq = force_fq or ""
     m_fq = re.search(r"FROM\s+`([^`]+)`", tail, re.I)
-    if m_fq:
+    if m_fq and not fact_fq:
         fact_fq = m_fq.group(1)
     name_fq, name_cols, join_on = resolve_user_name_source(
         fact_fq, columns_by_table, included_tables
     )
-    # Names already on fact table
     if not name_fq and name_cols:
         bits = ["`user_id`"] + [f"`{c}`" for c in name_cols]
         return (
@@ -802,7 +847,8 @@ def rewrite_aggregate_to_user_list_sql(
             page=page,
             page_size=size,
         )
-    return base
+    return _enrich_user_list_with_hyphen_column(base)
+
 
 
 def detect_intent(question: str, *, has_thread_history: bool) -> str:

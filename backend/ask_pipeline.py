@@ -2151,6 +2151,19 @@ def iter_ask(
                 if name_pool:
                     _, extra_cols = _infer_hints_for_tables(name_pool)
                     drill_cols.update(extra_cols)
+                from question_intent import is_name_enrichment_table
+
+                force_fact = None
+                for t in selected or []:
+                    if t and not is_name_enrichment_table(t.full_table_id):
+                        force_fact = t.full_table_id
+                        break
+                if not force_fact:
+                    prior_ids = _tables_from_prior_sql(prior_sql, included_tables or [])
+                    for fq in prior_ids:
+                        if not is_name_enrichment_table(fq):
+                            force_fact = fq
+                            break
                 rewritten = rewrite_aggregate_to_user_list_sql(
                     prior_sql,
                     page=page,
@@ -2158,8 +2171,14 @@ def iter_ask(
                     question=original_question,
                     included_tables=included_tables,
                     columns_by_table=drill_cols,
+                    force_fact_fq=force_fact,
                 )
                 drill_table = selected[0] if selected else None
+                if force_fact:
+                    drill_table = next(
+                        (t for t in (included_tables or []) if t.full_table_id == force_fact),
+                        drill_table,
+                    )
                 if not drill_table:
                     prior_ids = _tables_from_prior_sql(prior_sql, included_tables or [])
                     if prior_ids:
@@ -2177,6 +2196,11 @@ def iter_ask(
                             if question_wants_user_names(original_question)
                             else ""
                         )
+                        # Include profile enrichment table(s) in selected for validation.
+                        selected_drill = [drill_table]
+                        for t in name_pool:
+                            if t.full_table_id not in {x.full_table_id for x in selected_drill}:
+                                selected_drill.append(t)
                         domain_resolved = (
                             drill_sql,
                             drill_table,
@@ -2185,7 +2209,7 @@ def iter_ask(
                                 f"(LIMIT {page_info['page_size']} OFFSET {(page - 1) * page_info['page_size']})"
                             ),
                         )
-                        selected = [drill_table]
+                        selected = selected_drill
                         yield {
                             "type": "status",
                             "message": (
@@ -2245,7 +2269,14 @@ def iter_ask(
 
         if domain_resolved:
             template_sql, domain_table, domain_reason = domain_resolved
-            selected = [domain_table]
+            # Keep enrichment companions (profile) already attached for name joins.
+            if not any(t.full_table_id == domain_table.full_table_id for t in selected):
+                selected = [domain_table] + list(selected)
+            else:
+                # Ensure fact table is first
+                selected = [domain_table] + [
+                    t for t in selected if t.full_table_id != domain_table.full_table_id
+                ]
             knowledges = [kb.load_table_knowledge(t) for t in selected]
             hints_map = _column_hints_map(selected)
             inferred, columns_by_table = _infer_hints_for_tables(selected)
@@ -2421,6 +2452,13 @@ def iter_ask(
                         if name_pool:
                             _, extra_cols = _infer_hints_for_tables(name_pool)
                             drill_cols.update(extra_cols)
+                        from question_intent import is_name_enrichment_table
+
+                        force_fact = None
+                        for t in selected or []:
+                            if t and not is_name_enrichment_table(t.full_table_id):
+                                force_fact = t.full_table_id
+                                break
                         drill_sql = rewrite_aggregate_to_user_list_sql(
                             prior_sql,
                             page=page,
@@ -2428,6 +2466,7 @@ def iter_ask(
                             question=original_question,
                             included_tables=included_tables,
                             columns_by_table=drill_cols,
+                            force_fact_fq=force_fact,
                         )
                         if drill_sql:
                             try:
@@ -2436,6 +2475,17 @@ def iter_ask(
                                 template_sql = bq.validate_select_only(drill_sql)
                                 sql_source = "drill_down"
                                 with_names = question_wants_user_names(original_question)
+                                if with_names and name_pool:
+                                    # Allow profile in validation/schema for name joins.
+                                    for t in name_pool:
+                                        if t.full_table_id not in {
+                                            x.full_table_id for x in selected
+                                        }:
+                                            selected.append(t)
+                                    hints_map = _column_hints_map(selected)
+                                    inferred, columns_by_table = _infer_hints_for_tables(
+                                        selected
+                                    )
                                 semantic_reason = (
                                     f"Drill-down page {page} — listing user_id"
                                     f"{' + names' if with_names else ''}"

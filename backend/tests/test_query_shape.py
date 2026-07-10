@@ -114,6 +114,39 @@ class DrillDownContinuityTests(unittest.TestCase):
         )
         self.assertIn("user_id_with_hyphens", out)
 
+    def test_force_fact_retargets_away_from_master(self):
+        from question_intent import rewrite_aggregate_to_user_list_sql
+
+        class T:
+            def __init__(self, fq):
+                self.full_table_id = fq
+
+        engagement = "proj.ds.y_academy_user_event_engagement_details"
+        master = "proj.ds.z_ccbp_academy_users_master_data"
+        profile = "proj.ds.academy_user_profile_basic_details"
+        prior = (
+            f"SELECT DISTINCT s.`user_id`, p.`first_name` AS `first_name` "
+            f"FROM ( SELECT DISTINCT `user_id` FROM `{master}` ) AS s "
+            f"LEFT JOIN `{profile}` AS p ON s.`user_id` = p.`user_id`"
+        )
+        out = rewrite_aggregate_to_user_list_sql(
+            prior,
+            question="give their names and user ids",
+            included_tables=[T(engagement), T(master), T(profile)],
+            columns_by_table={
+                engagement: {"user_id", "event_id"},
+                master: {"user_id"},
+                profile: {"user_id", "first_name", "last_name"},
+            },
+            force_fact_fq=engagement,
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("y_academy_user_event_engagement_details", out)
+        self.assertIn(
+            "REPLACE(s.`user_id`, '-', '') = REPLACE(p.`user_id`, '-', '')",
+            out,
+        )
+
     def test_id_list_followup_chips(self):
         from presentation import suggest_id_list_followups
 
