@@ -289,6 +289,46 @@ def _is_feedback_question(question: str) -> bool:
     return is_feedback_table_question(q)
 
 
+def _try_placement_template_sql(
+    question: str,
+    selected_tables: list,
+    hints_map: dict,
+    inferred: dict,
+    columns_by_table: dict[str, set[str]],
+    *,
+    included_tables: list | None = None,
+    schema_entities: list | None = None,
+) -> str | None:
+    """Always-on placement count template (date filters for this year / periods)."""
+    from memory_lookup import sql_matches_question_intent
+    from placement_sql import try_build_placement_sql
+
+    pool = list(selected_tables)
+    if included_tables:
+        seen = {t.full_table_id for t in pool}
+        for t in included_tables:
+            if t.full_table_id not in seen:
+                pool.append(t)
+                seen.add(t.full_table_id)
+    raw = try_build_placement_sql(question, pool, columns_by_table)
+    if not raw:
+        return None
+    try:
+        sql = bq.validate_select_only(raw)
+    except ValueError:
+        return None
+    if not sql_matches_question_intent(
+        question, sql, schema_entities=schema_entities
+    ):
+        return None
+    violations = validate_sql(
+        sql, question, pool, hints_map, inferred, columns_by_table=columns_by_table
+    )
+    if violations:
+        return None
+    return sql
+
+
 def _try_nps_template_sql(
     question: str,
     selected_tables: list,
@@ -2234,6 +2274,33 @@ def iter_ask(
                             sql_source = "nps_template"
                             ask_trace(
                                 "nps_template_sql",
+                                question=question[:200],
+                                hit=True,
+                                sql_preview=(template_sql or "")[:300],
+                            )
+
+                # Placement / got-jobs counts — apply this year / period on date_of_placement.
+                if not template_sql:
+                    from placement_sql import is_placement_count_question
+
+                    if is_placement_count_question(question) or re.search(
+                        r"\bplaced\b|\bplacement\b|\bgot\s+jobs?\b", question, re.I
+                    ):
+                        place_sql = _try_placement_template_sql(
+                            question,
+                            selected,
+                            hints_map,
+                            inferred,
+                            columns_by_table,
+                            included_tables=included_tables,
+                            schema_entities=query_ctx.schema_entities,
+                        )
+                        if place_sql:
+                            template_sql = place_sql
+                            semantic_reason = "Placement template SQL"
+                            sql_source = "placement_template"
+                            ask_trace(
+                                "placement_template_sql",
                                 question=question[:200],
                                 hit=True,
                                 sql_preview=(template_sql or "")[:300],

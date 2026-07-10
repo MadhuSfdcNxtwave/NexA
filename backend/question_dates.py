@@ -78,6 +78,8 @@ def resolve_relative_range(question: str, *, today: date | None = None) -> tuple
         return start, ref
     if re.search(r"\bthis\s+month\b|\bcurrent\s+month\b|\bmtd\b", q):
         return ref.replace(day=1), ref
+    if re.search(r"\bthis\s+year\b|\bcurrent\s+year\b|\bytd\b", q):
+        return date(ref.year, 1, 1), ref
 
     if re.search(r"\byesterday\b|\byestarday\b|\byesterdy\b|\byesturday\b", q):
         d = ref - timedelta(days=1)
