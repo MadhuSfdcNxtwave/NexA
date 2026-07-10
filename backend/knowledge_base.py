@@ -115,6 +115,7 @@ class TableKnowledge:
     column_descriptions: dict[str, str]
     column_types: dict[str, str]
     ai_overview: str = ""
+    business_rules: str = ""
     operational_guidance: str = ""
     endorsed: bool = False
     included_for_ai: bool = True
@@ -171,6 +172,7 @@ def load_table_knowledge(table: Any) -> TableKnowledge:
         column_descriptions=column_descriptions,
         column_types=column_types,
         ai_overview=(getattr(table, "ai_overview", "") or "").strip(),
+        business_rules=(getattr(table, "business_rules", "") or "").strip(),
         operational_guidance=operational_guidance,
         endorsed=bool(getattr(table, "endorsed", False)),
         included_for_ai=bool(getattr(table, "included_for_ai", True)),
@@ -490,6 +492,15 @@ def build_knowledge_header(
                 ln = ln.strip()
                 if ln:
                     lines.append(f"#   {ln[:220]}")
+        if k.business_rules:
+            lines.append(
+                f"# BUSINESS RULES for `{k.short_name}` "
+                "(MUST FOLLOW for SQL — override default measure filters when they conflict):"
+            )
+            for ln in k.business_rules.splitlines():
+                ln = ln.strip()
+                if ln:
+                    lines.append(f"#   {ln[:300]}")
         picked = [c for c in column_matches.get(k.full_table_id, []) if c.selected]
         if picked:
             lines.append(f"# USE THESE COLUMNS for `{k.short_name}` (from column descriptions):")
@@ -518,6 +529,9 @@ def build_answer_kb_context(knowledges: list[TableKnowledge], *, max_chars: int 
         overview = (k.ai_overview or "").strip()
         if overview:
             block.append(f"AI overview: {overview[:600]}")
+        rules = (k.business_rules or "").strip()
+        if rules:
+            block.append(f"Business rules: {rules[:500]}")
         if len(block) > 1:
             parts.append("\n".join(block))
     text = "\n\n".join(parts).strip()

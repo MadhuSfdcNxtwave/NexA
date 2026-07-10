@@ -1190,6 +1190,7 @@ def _project_table_out(t: WorkspaceTable) -> schemas.TableOut:
         description=t.description or "",
         column_descriptions=_parse_column_descriptions(t.column_descriptions_json),
         column_hints=_parse_column_hints(t.column_hints_json),
+        business_rules=getattr(t, "business_rules", "") or "",
         ai_overview=getattr(t, "ai_overview", "") or "",
         embedding_indexed=_has_embedding(getattr(t, "embedding_json", "") or ""),
         embedding_model=getattr(t, "embedding_model", "") or "",
@@ -1498,6 +1499,8 @@ def update_workspace_table(
         t.column_descriptions_json = json.dumps(body.column_descriptions)
     if body.column_hints is not None:
         t.column_hints_json = json.dumps(body.column_hints)
+    if body.business_rules is not None:
+        t.business_rules = body.business_rules
     if body.included_for_ai is not None:
         t.included_for_ai = body.included_for_ai
     if body.endorsed is not None:
@@ -1742,6 +1745,8 @@ def update_table(
         t.column_descriptions_json = json.dumps(body.column_descriptions)
     if body.column_hints is not None:
         t.column_hints_json = json.dumps(body.column_hints)
+    if body.business_rules is not None:
+        t.business_rules = body.business_rules
     if body.included_for_ai is not None:
         t.included_for_ai = body.included_for_ai
     if body.endorsed is not None:

@@ -181,6 +181,7 @@ class TableOut(BaseModel):
     description: str = ""
     column_descriptions: dict[str, str] = {}
     column_hints: dict[str, str] = {}
+    business_rules: str = ""
     ai_overview: str = ""
     embedding_indexed: bool = False
     embedding_model: str = ""
@@ -196,6 +197,7 @@ class TableUpdate(BaseModel):
     description: str | None = None
     column_descriptions: dict[str, str] | None = None
     column_hints: dict[str, str] | None = None
+    business_rules: str | None = None
     included_for_ai: bool | None = None
     endorsed: bool | None = None
 

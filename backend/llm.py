@@ -353,7 +353,9 @@ SQL_SYSTEM = (
     "status values (e.g. hired/placed status columns) — use the EXACT values shown there.\n"
     "\n"
     "## Filters — do NOT invent them\n"
-    "- Add pause_status IS NULL ONLY when the question explicitly says active, live, "
+    "- If TABLE BUSINESS RULES say not to add WHERE filters (or that every row is already "
+    "active), follow those rules and do NOT add pause_status / onboarding filters.\n"
+    "- Otherwise: add pause_status IS NULL ONLY when the question explicitly says active, live, "
     "not paused, or current students. If the question just says students/users/count, "
     "do NOT filter by pause_status.\n"
     "- Add date/month filters ONLY when the question mentions a time period.\n"
@@ -487,8 +489,8 @@ KB_ROUTER_SYSTEM = (
     "filters are BigQuery WHERE fragments (no WHERE keyword). "
     "Prefer tables whose purpose matches the question semantics, not word overlap. "
     "For user counts prefer the table that stores the entity grain (one row per user vs per event). "
-    "For learning portal active users use master data with pause_status IS NULL, "
-    "not question-level or page-level tables."
+    "For learning portal active users use master data; follow that table's BUSINESS RULES "
+    "(if rules say no WHERE filters, count all rows — do not invent pause_status filters)."
 )
 
 

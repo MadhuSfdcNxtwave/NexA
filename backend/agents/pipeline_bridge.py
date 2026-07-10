@@ -59,10 +59,10 @@ def enrich_schema_context(table_ids: list[str], base_schema: str) -> str:
     return base_schema
 
 
-def business_rules_block(question: str) -> str:
+def business_rules_block(question: str, tables: list | None = None) -> str:
     if not agents_enabled():
         return ""
-    return prompt_block_for_question(question)
+    return prompt_block_for_question(question, tables=tables)
 
 
 def try_learned_pattern(question: str) -> PatternMatch | None:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -1989,7 +1990,7 @@ def iter_ask(
     )
 
     schema_text = enrich_schema_context([t.full_table_id for t in selected], schema_text)
-    rules_block = business_rules_block(question)
+    rules_block = business_rules_block(question, tables=selected)
     if rules_block:
         schema_text += "\n\n" + rules_block
     model_used = sql_model_for_question(question) if agents_enabled() else config.FETCH_MODEL

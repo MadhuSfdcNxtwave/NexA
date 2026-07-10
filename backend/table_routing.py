@@ -332,6 +332,11 @@ def validate_sql_table_choice(question: str, sql: str) -> tuple[bool, str]:
 
 def sql_filters_for_table(question: str, table: object) -> list[str]:
     """Apply rule filters when columns exist on the table."""
+    from table_business_rules import table_skips_default_filters
+
+    if table_skips_default_filters(table):
+        return []
+
     rule = match_routing_rule(question)
     if not rule:
         return []

@@ -185,6 +185,8 @@ class WorkspaceTable(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     column_descriptions_json: Mapped[str] = mapped_column(Text, default="{}")
     column_hints_json: Mapped[str] = mapped_column(Text, default="{}")
+    # Free-text SQL / metric rules for Ask (overrides default measure filters when set).
+    business_rules: Mapped[str] = mapped_column(Text, default="")
     # One-time AI profile: columns + sample data + date ranges + join/query guidance.
     ai_overview: Mapped[str] = mapped_column(Text, default="")
     ai_profile_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -458,6 +460,8 @@ def _migrate_workspace_tables() -> None:
             alters.append("ALTER TABLE workspace_tables ADD COLUMN ai_overview TEXT DEFAULT ''")
         if "ai_profile_json" not in existing:
             alters.append("ALTER TABLE workspace_tables ADD COLUMN ai_profile_json TEXT DEFAULT '{}'")
+        if "business_rules" not in existing:
+            alters.append("ALTER TABLE workspace_tables ADD COLUMN business_rules TEXT DEFAULT ''")
         if "embedding_model" not in existing:
             alters.append("ALTER TABLE workspace_tables ADD COLUMN embedding_model VARCHAR(120) DEFAULT ''")
         if "embedding_hash" not in existing:

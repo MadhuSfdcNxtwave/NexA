@@ -36,6 +36,38 @@ function DescriptionEditor({ value, onSave }) {
   );
 }
 
+function BusinessRulesEditor({ value, onSave }) {
+  const [text, setText] = useState(value || "");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { setText(value || ""); }, [value]);
+  const save = () => {
+    if (text !== (value || "")) {
+      onSave(text);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    }
+  };
+  return (
+    <div className="description-block business-rules-block">
+      <label>Business rules</label>
+      <p className="muted small" style={{ margin: "0 0 6px" }}>
+        Rules Ask must follow for this table (overrides default filters). Example:{" "}
+        <em>Every row is an active portal user — do not add WHERE filters.</em>
+      </p>
+      <textarea
+        rows={4}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={save}
+        placeholder={"Every row is an active learning portal user.\nDo not add pause_status or onboarding WHERE filters.\nUse COUNT(DISTINCT user_id) only."}
+      />
+      <button type="button" className="secondary small" onClick={save}>
+        {saved ? "Saved" : "Save rules"}
+      </button>
+    </div>
+  );
+}
+
 function ColumnDescriptionEditor({ value, onSave, placeholder }) {
   const [text, setText] = useState(value || "");
   const [saved, setSaved] = useState(false);
@@ -1097,13 +1129,31 @@ export default function DataBrowserPage() {
 
                 {projectTable && (
                   canEdit ? (
+                  <>
                   <DescriptionEditor
                     value={projectTable.description}
                     onSave={(description) => updateProjectTable({ description })}
                   />
-                  ) : projectTable.description ? (
-                    <p className="bq-description muted">{projectTable.description}</p>
-                  ) : null
+                  <BusinessRulesEditor
+                    value={projectTable.business_rules || ""}
+                    onSave={(business_rules) => updateProjectTable({ business_rules })}
+                  />
+                  </>
+                  ) : (
+                  <>
+                    {projectTable.description ? (
+                      <p className="bq-description muted">{projectTable.description}</p>
+                    ) : null}
+                    {projectTable.business_rules ? (
+                      <div className="description-block">
+                        <label>Business rules</label>
+                        <pre className="bq-description muted" style={{ whiteSpace: "pre-wrap" }}>
+                          {projectTable.business_rules}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </>
+                  )
                 )}
 
                 {!projectTable && metadata?.description && (
