@@ -55,6 +55,7 @@ class QueryContext:
     presentation_hints: list[str] = field(default_factory=list)
     schema_entities: list[Any] = field(default_factory=list)
     matched_entity_label: str = ""
+    pasted_user_ids: list[str] = field(default_factory=list)
 
 
 def _detect_entity(question: str) -> str:
@@ -129,6 +130,8 @@ def build_query_context(
     *,
     original_question: str = "",
     has_thread_history: bool = False,
+    prior_question: str = "",
+    prior_sql: str = "",
 ) -> QueryContext:
     """Step 1a: question-only context (before table routing)."""
     orig = (original_question or question or "").strip()
@@ -138,12 +141,29 @@ def build_query_context(
     entity = _detect_entity(expanded)
     label = _ENTITY_LABELS.get(entity, _ENTITY_LABELS["general"])
 
+    from user_id_filter import resolve_user_ids
+
+    pasted_ids = resolve_user_ids(
+        orig or expanded,
+        prior_question=prior_question,
+        prior_sql=prior_sql,
+    )
+    if not pasted_ids:
+        pasted_ids = resolve_user_ids(
+            expanded,
+            prior_question=prior_question,
+            prior_sql=prior_sql,
+        )
+
     if intent == "explain_prior":
         msg = "Reviewing your previous answers…"
     elif intent == "assistant":
         msg = "Understanding your message…"
     elif intent == "knowledge_query":
         msg = "Looking up what that means…"
+    elif pasted_ids:
+        n = len(pasted_ids)
+        msg = f"Understanding your question about {n} pasted user id{'s' if n != 1 else ''}…"
     elif wants_bd:
         msg = f"Understanding your question — breakdown by {label}…"
     else:
@@ -159,6 +179,7 @@ def build_query_context(
         sql_entity_hint=_static_sql_hint(entity, wants_bd),
         understanding_message=msg,
         presentation_hints=_presentation_hints(entity, wants_bd, question=expanded),
+        pasted_user_ids=pasted_ids,
     )
 
 
@@ -208,4 +229,5 @@ def enrich_query_context(
         ),
         schema_entities=entities,
         matched_entity_label=matched_label,
+        pasted_user_ids=list(ctx.pasted_user_ids or []),
     )

@@ -97,6 +97,32 @@ def sql_intent_mismatch_reason(
     if is_nps_topic_feedback_question(q) and not nps_topic_sql_shape_ok(sql_text):
         return "NPS topic feedback requires union SQL across both NPS form tables"
 
+    # Feedback questions must not land on portal time-spent page activity SQL.
+    if re.search(r"\b(feedback|emoji|survey|user_answer|question_text)\b", q, re.I) and not re.search(
+        r"\bnps\b", q, re.I
+    ):
+        if re.search(
+            r"day_and_page_wise_time_spent|time_spent_page|portal_activity",
+            sql_text,
+            re.I,
+        ):
+            return "feedback question must use contextual feedback SQL, not portal time-spent"
+        # Feature-scoped feedback must not be whole-table unique_users.
+        try:
+            from feedback_sql import feature_scope_terms
+
+            scope = feature_scope_terms(q)
+        except Exception:
+            scope = []
+        if scope and re.search(r"contextual_feedback", sql_text, re.I):
+            if re.search(r"COUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I) and not re.search(
+                r"LIKE\s+'%", sql_text, re.I
+            ):
+                return (
+                    "feature feedback count must filter feedback_trigger/question_text "
+                    f"(expected terms like {', '.join(scope[:3])})"
+                )
+
     if re.search(
         r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"
         r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",

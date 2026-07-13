@@ -209,6 +209,17 @@ def try_build_measure_plan(
     short = fq.rsplit(".", 1)[-1]
     group_by = _breakdown_dims(question, semantic)
 
+    # Feature-scoped contextual feedback ("calendar page", "notice board") must
+    # not collapse to unfiltered unique_users — feedback_sql owns that path.
+    if "contextual_feedback" in short.lower():
+        try:
+            from feedback_sql import feature_scope_terms
+
+            if feature_scope_terms(question):
+                return None
+        except Exception:
+            return None
+
     if _COUNT_RE.search(question) or not group_by:
         measure = _pick_count_measure(semantic, question)
         if measure:

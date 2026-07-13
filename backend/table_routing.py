@@ -171,6 +171,13 @@ ROUTING_RULES: tuple[RoutingRule, ...] = (
 )
 
 
+def _is_non_nps_feedback_question(question: str) -> bool:
+    q = question or ""
+    if re.search(r"\bnps\b", q, re.I):
+        return False
+    return bool(re.search(r"\b(feedback|emoji|survey|user_answer|question_text)\b", q, re.I))
+
+
 def normalize_question(question: str) -> str:
     from question_intent import expand_question_abbreviations
 
@@ -191,10 +198,19 @@ def detect_domain_signals(question: str) -> set[str]:
         _PORTAL_ACCESS.search(q) or re.search(r"\band\b", q, re.I)
     ):
         signals.add("learning_portal")
-    if _PORTAL_MENTION.search(q) and re.search(
-        r"\bactivity|activit|which\s+page|page\b|events?\b|actively\b",
-        q,
-        re.I,
+    # "feedback on calendar page in learning portal" is contextual feedback,
+    # not page time-spent — do not emit portal_page_activity when feedback wins.
+    _has_feedback = bool(re.search(r"\b(feedback|emoji|survey)\b", q, re.I)) and not re.search(
+        r"\bnps\b", q, re.I
+    )
+    if (
+        not _has_feedback
+        and _PORTAL_MENTION.search(q)
+        and re.search(
+            r"\bactivity|activit|which\s+page|page\b|events?\b|actively\b",
+            q,
+            re.I,
+        )
     ):
         signals.add("portal_page_activity")
     if re.search(r"\battendance\b|\battend(?:ed|ance)?\b", q, re.I) and re.search(
@@ -289,6 +305,9 @@ def match_routing_rule(question: str) -> RoutingRule | None:
         return None
     for rule in ROUTING_RULES:
         if not rule.question_re.search(q):
+            continue
+        if rule.id == "learning_portal_page_activity" and _is_non_nps_feedback_question(q):
+            # "feedback on calendar page in learning portal" → contextual feedback
             continue
         if rule.id == "contextual_feedback":
             # NPS / live-class / coach feedback are different datasets.

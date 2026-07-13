@@ -105,6 +105,70 @@ class PortalActivityTests(unittest.TestCase):
         sql = compose_portal_activity_attendance_pct_sql(q, tables)
         self.assertIsNotNone(sql)
 
+    def test_feedback_on_calendar_page_not_portal_time_spent(self):
+        """Regression: feedback + page + learning portal must not use time-spent SQL."""
+        from agents.temp_query_agent import plan_question
+        from feedback_sql import is_feedback_table_question, try_build_feedback_sql
+        from memory_lookup import sql_matches_question_intent
+        from table_routing import detect_domain_signals, match_routing_rule, pin_table
+        from join_compose import try_compose_join_sql
+
+        q = (
+            "what is the feedback on calender page in learning portal "
+            "how many we recieved on that new feature"
+        )
+        self.assertTrue(is_feedback_table_question(q))
+
+        rule = match_routing_rule(q)
+        self.assertIsNotNone(rule)
+        assert rule is not None
+        self.assertEqual(rule.id, "contextual_feedback")
+        self.assertEqual(rule.table_short, "users_contextual_feedback_details")
+
+        signals = detect_domain_signals(q)
+        self.assertIn("contextual_feedback", signals)
+        self.assertNotIn("portal_page_activity", signals)
+
+        tables = [
+            _table("users_contextual_feedback_details"),
+            _table("academy_users_day_and_page_wise_time_spent_details"),
+        ]
+        self.assertEqual(
+            pin_table(q, tables),
+            [f"{DATASET}.users_contextual_feedback_details"],
+        )
+        self.assertIsNone(compose_portal_activity_by_page_sql(q, tables))
+        self.assertIsNone(try_compose_join_sql(q, tables))
+
+        plan = plan_question(q)
+        self.assertNotEqual(plan.metric, "portal_activity")
+
+        cols = {
+            f"{DATASET}.users_contextual_feedback_details": {
+                "user_id",
+                "feedback_id",
+                "feedback_trigger",
+                "question_text",
+                "user_answer",
+                "question_type",
+                "submitted_date",
+            },
+        }
+        fb_sql = try_build_feedback_sql(q, tables, cols)
+        self.assertIsNotNone(fb_sql)
+        assert fb_sql is not None
+        self.assertIn("users_contextual_feedback_details", fb_sql)
+        self.assertNotIn("time_spent_page", fb_sql)
+        self.assertTrue(sql_matches_question_intent(q, fb_sql))
+
+        bad = """
+SELECT time_spent_page AS portal_activity, COUNT(DISTINCT user_id) AS active_users
+FROM `kossip-helpers.academy_success_ai_analytics_worksapce.academy_users_day_and_page_wise_time_spent_details`
+WHERE lp_status = 'ACTIVE'
+GROUP BY time_spent_page
+"""
+        self.assertFalse(sql_matches_question_intent(q, bad))
+
 
 if __name__ == "__main__":
     unittest.main()
