@@ -223,10 +223,16 @@ _GENERIC_SCOPE_TERMS = frozenset(
 
 def feature_scope_terms(question: str) -> list[str]:
     """Non-generic keywords (e.g. calendar, notice) that should filter feedback."""
+    from user_id_filter import strip_user_ids_from_text
+
+    cleaned = strip_user_ids_from_text(question or "")
     out: list[str] = []
     seen: set[str] = set()
-    for t in _terms(question):
+    for t in _terms(cleaned):
         if t in _GENERIC_SCOPE_TERMS or t in seen:
+            continue
+        # Skip hex fragments from ids
+        if re.fullmatch(r"[0-9a-f]{8,}", t):
             continue
         seen.add(t)
         out.append(t)
@@ -544,6 +550,7 @@ def try_build_feedback_sql(
     *,
     relaxed: bool = False,
     discovery: bool = False,
+    user_ids: list[str] | None = None,
 ) -> str | None:
     """Simple single-table SQL for feedback questions - CTEs allowed after validation."""
     picked = _pick_feedback_table(tables, columns_by_table)
@@ -555,39 +562,57 @@ def try_build_feedback_sql(
         return None
 
     if discovery:
-        return _build_discovery_sql(fq, cols, q)
+        sql = _build_discovery_sql(fq, cols, q)
+    elif not relaxed and not is_feedback_table_question(q) and not is_survey_answer_question(q):
+        return None
+    else:
+        sql = None
+        # Raw / CSV / field-wise → row-level SELECT, never GROUP BY aggregates.
+        try:
+            from agents.answer_shape import wants_raw_tabular_data
 
-    if not relaxed and not is_feedback_table_question(q) and not is_survey_answer_question(q):
+            if wants_raw_tabular_data(q):
+                sql = _build_raw_export_sql(fq, cols, q)
+        except Exception:
+            pass
+
+        if sql is None:
+            # "how many feedback on calendar page" → scoped COUNT, never whole-table unique_users.
+            scope = feature_scope_terms(q)
+            if scope and (
+                _GROUP_INTENT.search(q)
+                or re.search(r"\bhow many\b|\breceiv|\breciev|\bgot\b|\bsubmitted\b", q, re.I)
+            ):
+                sql = _build_feature_scope_sql(fq, cols, q, scope)
+            else:
+                terms = _terms(q)
+                if is_survey_answer_question(q) or _GROUP_INTENT.search(q) or is_feedback_table_question(q):
+                    if scope:
+                        sql = _build_feature_scope_sql(fq, cols, q, scope)
+                    else:
+                        sql = _build_group_sql(fq, cols, q, terms=terms)
+                elif relaxed and terms:
+                    if scope:
+                        sql = _build_feature_scope_sql(fq, cols, q, scope)
+                    else:
+                        sql = _build_group_sql(fq, cols, q, terms=terms, min_score=1)
+
+    if not sql:
         return None
 
-    # Raw / CSV / field-wise → row-level SELECT, never GROUP BY aggregates.
-    try:
-        from agents.answer_shape import wants_raw_tabular_data
+    ids = list(user_ids or [])
+    if not ids:
+        try:
+            from user_id_filter import extract_user_ids_from_text
 
-        if wants_raw_tabular_data(q):
-            return _build_raw_export_sql(fq, cols, q)
-    except Exception:
-        pass
+            ids = extract_user_ids_from_text(q)
+        except Exception:
+            ids = []
+    if ids:
+        from user_id_filter import ensure_user_id_filter
 
-    # "how many feedback on calendar page" → scoped COUNT, never whole-table unique_users.
-    scope = feature_scope_terms(q)
-    if scope and (
-        _GROUP_INTENT.search(q)
-        or re.search(r"\bhow many\b|\breceiv|\breciev|\bgot\b|\bsubmitted\b", q, re.I)
-    ):
-        return _build_feature_scope_sql(fq, cols, q, scope)
-
-    terms = _terms(q)
-    if is_survey_answer_question(q) or _GROUP_INTENT.search(q) or is_feedback_table_question(q):
-        # Still prefer feature scope when a named page/feature is present.
-        if scope:
-            return _build_feature_scope_sql(fq, cols, q, scope)
-        return _build_group_sql(fq, cols, q, terms=terms)
-    if relaxed and terms:
-        if scope:
-            return _build_feature_scope_sql(fq, cols, q, scope)
-        return _build_group_sql(fq, cols, q, terms=terms, min_score=1)
-    return None
+        sql = ensure_user_id_filter(sql, ids)
+    return sql
 
 
 def _build_raw_export_sql(fq: str, cols: set[str], question: str) -> str:

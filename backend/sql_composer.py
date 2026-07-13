@@ -108,6 +108,17 @@ def compose_sql(plan: MeasurePlan, question: str, table: object) -> str:
 
     where_parts = _dedupe_clauses(where_parts)
 
+    try:
+        from user_id_filter import extract_user_ids_from_text, user_id_in_sql
+
+        pasted = extract_user_ids_from_text(question or "")
+        if pasted:
+            clause = user_id_in_sql(pasted)
+            if clause and clause not in where_parts:
+                where_parts.append(clause)
+    except Exception:
+        pass
+
     if plan.group_by:
         cols = ", ".join(f"`{c}`" for c in plan.group_by)
         sql = (

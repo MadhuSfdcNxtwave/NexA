@@ -1610,6 +1610,8 @@ def iter_ask(
         question,
         original_question=original_question,
         has_thread_history=bool(cache_entries) or bool(project_context.strip()),
+        prior_question=prior_q,
+        prior_sql=prior_sql,
     )
     question = query_ctx.question
     yield {"type": "status", "message": query_ctx.understanding_message}
@@ -2083,6 +2085,15 @@ def iter_ask(
     shape_checkpoint = query_shape.to_schema_checkpoint() if query_shape else ""
     if shape_checkpoint:
         schema_text = shape_checkpoint + "\n\n" + schema_text
+    pasted_ids = list(getattr(query_ctx, "pasted_user_ids", None) or [])
+    if pasted_ids:
+        from user_id_filter import prompt_block as user_id_prompt_block
+
+        schema_text = user_id_prompt_block(pasted_ids) + "\n\n" + schema_text
+        yield {
+            "type": "status",
+            "message": f"Filtering to {len(pasted_ids)} pasted user id(s)…",
+        }
     model_used = sql_model_for_question(question) if agents_enabled() else config.FETCH_MODEL
 
     routing_meta = _routing_meta(plan=plan, selected=selected)
@@ -2316,6 +2327,11 @@ def iter_ask(
                 if "Drill-down" in (domain_reason or "")
                 else "domain"
             )
+            pasted_ids = list(getattr(query_ctx, "pasted_user_ids", None) or [])
+            if pasted_ids and sql:
+                from user_id_filter import ensure_user_id_filter
+
+                sql = ensure_user_id_filter(sql, pasted_ids)
             chain_steps = None
             routing_meta = {
                 **routing_meta,
@@ -2995,6 +3011,12 @@ def iter_ask(
                             sql_preview=(sql or "")[:300],
                         )
 
+                pasted_ids = list(getattr(query_ctx, "pasted_user_ids", None) or [])
+                if pasted_ids and sql:
+                    from user_id_filter import ensure_user_id_filter
+
+                    sql = ensure_user_id_filter(sql, pasted_ids)
+
                 ask_trace(
                     "sql_ready",
                     question=question[:200],
@@ -3108,6 +3130,19 @@ def iter_ask(
                         return
 
     display_question = original_question
+
+    # Paste single/multiple user ids (or reuse from thread) → always apply filter.
+    pasted_ids = list(getattr(query_ctx, "pasted_user_ids", None) or [])
+    if pasted_ids and sql:
+        from user_id_filter import ensure_user_id_filter
+
+        sql = ensure_user_id_filter(sql, pasted_ids)
+        ask_trace(
+            "pasted_user_id_filter",
+            question=question[:200],
+            id_count=len(pasted_ids),
+            sql_preview=(sql or "")[:300],
+        )
 
     yield {"type": "running_query", "message": "Running query on BigQuery…"}
     try:
