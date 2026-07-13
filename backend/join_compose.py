@@ -12,10 +12,19 @@ _CROSS_TABLE_BREAKDOWN = re.compile(
 )
 _PORTAL_ACTIVITY = re.compile(
     r"\b(?:learning[\s_-]*portal|learningportal|portal)\b.{0,60}\b(activity|activit|page|events?|which)\b|"
-    r"\b(which|what)\b.{0,40}\b(activity|page)\b|"
+    # Require portal context — bare "what … page" must not steal feedback questions.
+    r"\b(which|what)\b.{0,40}\b(activity|page)\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b|"
     r"\bin which activity\b|"
     r"\bactiv(?:e|ly|lly)\s+in\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b|"
     r"\bevents?\b.{0,40}\b(?:learning[\s_-]*portal|learningportal|portal)\b",
+    re.I,
+)
+# In-app / survey feedback is NEVER portal time-spent page activity.
+_FEEDBACK_OVERRIDES_PORTAL = re.compile(
+    r"\b("
+    r"feedback|contextual\s+feedback|emoji|survey|"
+    r"user_answer|question_text|feedback_trigger|feedback_details"
+    r")\b",
     re.I,
 )
 _PORTAL_ATTEND_PCT = re.compile(
@@ -167,9 +176,20 @@ GROUP BY m.`gender`
 ORDER BY `unique_applicants` DESC"""
 
 
+def _feedback_blocks_portal_activity(question: str) -> bool:
+    """True when the ask is about feedback/surveys, not page time-spent."""
+    q = _q(question)
+    if not _FEEDBACK_OVERRIDES_PORTAL.search(q):
+        return False
+    # NPS analytics uses its own templates; still not portal time-spent.
+    return True
+
+
 def compose_portal_activity_by_page_sql(question: str, tables: list[Any]) -> str | None:
     """Which portal page/activity active students use — NOT event_engagement."""
     q = _q(question)
+    if _feedback_blocks_portal_activity(q):
+        return None
     if not _PORTAL_ACTIVITY.search(q):
         return None
     if _PORTAL_ATTEND_PCT.search(q):
@@ -202,6 +222,8 @@ LIMIT 50"""
 def compose_portal_activity_attendance_pct_sql(question: str, tables: list[Any]) -> str | None:
     """Portal page activity + live class attendance % per page (notebook final cell)."""
     q = _q(question)
+    if _feedback_blocks_portal_activity(q):
+        return None
     if not _PORTAL_ATTEND_PCT.search(q) and not (
         _PORTAL_ACTIVITY.search(q)
         and re.search(r"\battendance\b|\battend\b", q, re.I)

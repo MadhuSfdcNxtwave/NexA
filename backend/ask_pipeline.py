@@ -2407,8 +2407,42 @@ def iter_ask(
                 template_sql = None
                 semantic_tables = None
 
+                # Feedback first — "feedback on calendar page in learning portal"
+                # must never lose to portal time-spent / temp-agent templates.
+                if not has_clarification and _is_feedback_question(question):
+                    template_sql = _try_feedback_template_sql(
+                        question,
+                        selected,
+                        hints_map,
+                        inferred,
+                        columns_by_table,
+                    )
+                    if template_sql:
+                        sql_source = "feedback_template"
+                        semantic_reason = "Contextual feedback SQL (before portal templates)"
+                        fb = next(
+                            (
+                                t
+                                for t in (included_tables or selected or [])
+                                if "contextual_feedback" in (t.full_table_id or "").lower()
+                            ),
+                            None,
+                        )
+                        if fb:
+                            semantic_tables = [fb]
+                            if fb.full_table_id not in {
+                                t.full_table_id for t in selected
+                            }:
+                                selected = [fb] + list(selected)
+                        ask_trace(
+                            "feedback_early_sql",
+                            question=question[:200],
+                            hit=True,
+                            sql_preview=(template_sql or "")[:300],
+                        )
+
                 # Temp query agent — plan complex / high-risk questions before planner.
-                if not has_clarification:
+                if not template_sql and not has_clarification:
                     from agents.temp_agent_bridge import try_temp_agent_sql
 
                     agent_sql, agent_reason, agent_clar = try_temp_agent_sql(

@@ -156,6 +156,23 @@ def _resolve_from_glossary(
     best_term, best_syn = matches[0]
     trace = [f"glossary:{best_term.id} via '{best_syn}'"]
 
+    # Feedback on a portal page/feature must not resolve to time-spent glossary terms.
+    if re.search(r"\b(feedback|emoji|survey)\b", q, re.I) and not re.search(r"\bnps\b", q, re.I):
+        matches = [
+            (t, s)
+            for t, s in matches
+            if t.id
+            not in (
+                "learning_portal_activity_by_page",
+                "portal_activity_attendance_pct",
+            )
+            and "day_and_page_wise" not in (t.model_id or "")
+        ]
+        if not matches:
+            return None
+        best_term, best_syn = matches[0]
+        trace = [f"glossary:{best_term.id} via '{best_syn}' (skipped portal activity for feedback)"]
+
     if best_term.intent == "compound" or best_term.model_id == "compound":
         from table_routing import detect_domain_signals
 

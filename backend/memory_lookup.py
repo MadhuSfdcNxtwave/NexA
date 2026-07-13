@@ -97,6 +97,17 @@ def sql_intent_mismatch_reason(
     if is_nps_topic_feedback_question(q) and not nps_topic_sql_shape_ok(sql_text):
         return "NPS topic feedback requires union SQL across both NPS form tables"
 
+    # Feedback questions must not land on portal time-spent page activity SQL.
+    if re.search(r"\b(feedback|emoji|survey|user_answer|question_text)\b", q, re.I) and not re.search(
+        r"\bnps\b", q, re.I
+    ):
+        if re.search(
+            r"day_and_page_wise_time_spent|time_spent_page|portal_activity",
+            sql_text,
+            re.I,
+        ):
+            return "feedback question must use contextual feedback SQL, not portal time-spent"
+
     if re.search(
         r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"
         r"\b(learning[\s_-]*portal|portal)\b.{0,40}\bactive\b",

@@ -162,6 +162,20 @@ def _terms(question: str, min_len: int = 4) -> list[str]:
     return out[:8]
 
 
+_WEIGHTED_TERMS: dict[str, int] = {
+    "valuable": 4,
+    "updates": 4,
+    "update": 4,
+    "recent": 3,
+    "program": 3,
+    "academy": 1,
+    "calendar": 5,
+    "calender": 5,  # common misspelling in user questions
+    "notice": 4,
+    "board": 3,
+}
+
+
 def _stem_variants(term: str) -> list[str]:
     """Light stemming so 'updates' also matches 'updated'."""
     t = term.lower()
@@ -172,17 +186,10 @@ def _stem_variants(term: str) -> list[str]:
         variants.add(t[:-2])
     if t.endswith("ing") and len(t) > 6:
         variants.add(t[:-3])
+    # Calendar feature spelling variants
+    if t in ("calendar", "calender"):
+        variants.update({"calendar", "calender"})
     return sorted(variants, key=len, reverse=True)
-
-
-_WEIGHTED_TERMS: dict[str, int] = {
-    "valuable": 4,
-    "updates": 4,
-    "update": 4,
-    "recent": 3,
-    "program": 3,
-    "academy": 1,
-}
 
 
 def _term_weight(term: str) -> int:

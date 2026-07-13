@@ -112,6 +112,17 @@ def plan_question(question: str) -> AgentPlan:
         plan.reason = "Placement count with optional CTC filter"
         return plan
 
+    # Feedback on a portal page/feature → contextual feedback, not time-spent.
+    if re.search(
+        r"\b(feedback|emoji|survey|user_answer|question_text|feedback_trigger)\b",
+        q,
+        re.I,
+    ):
+        plan.metric = "unknown"
+        plan.confidence = 0.15
+        plan.reason = "Feedback question — defer to contextual feedback path"
+        return plan
+
     if _PORTAL.search(q) and _ACTIVITY.search(q):
         plan.metric = "portal_activity"
         plan.breakdown = "page"
