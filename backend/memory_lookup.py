@@ -107,6 +107,21 @@ def sql_intent_mismatch_reason(
             re.I,
         ):
             return "feedback question must use contextual feedback SQL, not portal time-spent"
+        # Feature-scoped feedback must not be whole-table unique_users.
+        try:
+            from feedback_sql import feature_scope_terms
+
+            scope = feature_scope_terms(q)
+        except Exception:
+            scope = []
+        if scope and re.search(r"contextual_feedback", sql_text, re.I):
+            if re.search(r"COUNT\s*\(\s*DISTINCT\s+`?user_id", sql_text, re.I) and not re.search(
+                r"LIKE\s+'%", sql_text, re.I
+            ):
+                return (
+                    "feature feedback count must filter feedback_trigger/question_text "
+                    f"(expected terms like {', '.join(scope[:3])})"
+                )
 
     if re.search(
         r"\bactive\b.{0,40}\b(learning[\s_-]*portal|portal)\b|"

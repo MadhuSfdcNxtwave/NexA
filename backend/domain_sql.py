@@ -165,6 +165,27 @@ def resolve_domain_sql(
     if not table:
         return None
 
+    short = table.full_table_id.rsplit(".", 1)[-1]
+
+    # Contextual feedback must never become unfiltered unique_users COUNT —
+    # "feedback on calendar page" needs feature filters via feedback_sql.
+    if "contextual_feedback" in short.lower():
+        try:
+            from feedback_sql import try_build_feedback_sql
+
+            fb = try_build_feedback_sql(
+                question,
+                [table],
+                _columns_by_table_hint([table]),
+                relaxed=True,
+            )
+            if fb:
+                return fb, table, f"Contextual feedback SQL on `{short}`"
+        except Exception:
+            pass
+        # Refuse bare measure COUNT for this table.
+        return None
+
     from measure_router import try_build_measure_plan
     from sql_composer import compose_sql
 
@@ -172,7 +193,6 @@ def resolve_domain_sql(
     if not plan:
         return None
     sql = compose_sql(plan, question, table)
-    short = table.full_table_id.rsplit(".", 1)[-1]
     return sql, table, f"Domain SQL on `{short}`"
 
 

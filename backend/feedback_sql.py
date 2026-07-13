@@ -175,6 +175,122 @@ _WEIGHTED_TERMS: dict[str, int] = {
     "board": 3,
 }
 
+# Dropped when extracting the feature/page the user cares about.
+_GENERIC_SCOPE_TERMS = frozenset(
+    {
+        "feedback",
+        "response",
+        "responses",
+        "survey",
+        "emoji",
+        "rating",
+        "learning",
+        "portal",
+        "page",
+        "pages",
+        "feature",
+        "features",
+        "received",
+        "recieved",
+        "many",
+        "users",
+        "user",
+        "count",
+        "total",
+        "give",
+        "show",
+        "list",
+        "new",
+        "that",
+        "this",
+        "about",
+        "what",
+        "which",
+        "form",
+        "details",
+        "detail",
+        "contextual",
+        "inapp",
+        "app",
+        "data",
+        "till",
+        "now",
+        "month",
+        "current",
+    }
+)
+
+
+def feature_scope_terms(question: str) -> list[str]:
+    """Non-generic keywords (e.g. calendar, notice) that should filter feedback."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for t in _terms(question):
+        if t in _GENERIC_SCOPE_TERMS or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+        for v in _stem_variants(t):
+            if v not in seen and v not in _GENERIC_SCOPE_TERMS:
+                seen.add(v)
+                out.append(v)
+    return out[:10]
+
+
+def _feature_scope_where(cols: set[str], terms: list[str]) -> str:
+    """OR filter across feedback_trigger + question_text for feature keywords."""
+    if not terms:
+        return "TRUE"
+    text_cols = [c for c in ("feedback_trigger", "question_text") if c in cols]
+    if not text_cols:
+        text_cols = ["question_text"] if "question_text" in cols else []
+    if not text_cols:
+        return "TRUE"
+    likes: list[str] = []
+    for t in terms[:8]:
+        for v in _stem_variants(t)[:2]:
+            esc = _escape_sql_string(v)
+            for c in text_cols:
+                likes.append(f"LOWER(CAST(`{c}` AS STRING)) LIKE '%{esc}%'")
+    if not likes:
+        return "TRUE"
+    return "(" + " OR ".join(likes) + ")"
+
+
+def _build_feature_scope_sql(fq: str, cols: set[str], question: str, terms: list[str]) -> str:
+    """Count / breakdown of feedback for a named feature (calendar page, notice board, …)."""
+    where = _feature_scope_where(cols, terms)
+    extras: list[str] = []
+    if "is_valid_trigger" in cols:
+        extras.append("`is_valid_trigger` IS TRUE")
+    if "is_valid_question" in cols:
+        extras.append("`is_valid_question` IS TRUE")
+    if extras:
+        where = f"({where}) AND " + " AND ".join(extras)
+
+    # Prefer trigger breakdown so stakeholders see what matched + volumes.
+    if "feedback_trigger" in cols:
+        return f"""
+SELECT
+  COALESCE(`feedback_trigger`, '(unknown)') AS `feedback_about`,
+  COUNT(*) AS `feedback_responses`,
+  COUNT(DISTINCT `user_id`) AS `unique_users`,
+  COUNT(DISTINCT `feedback_id`) AS `unique_surveys`
+FROM `{fq}`
+WHERE {where}
+GROUP BY `feedback_about`
+ORDER BY `feedback_responses` DESC
+LIMIT 50
+""".strip()
+
+    return f"""
+SELECT
+  COUNT(*) AS `feedback_responses`,
+  COUNT(DISTINCT `user_id`) AS `unique_users`
+FROM `{fq}`
+WHERE {where}
+""".strip()
+
 
 def _stem_variants(term: str) -> list[str]:
     """Light stemming so 'updates' also matches 'updated'."""
@@ -453,10 +569,23 @@ def try_build_feedback_sql(
     except Exception:
         pass
 
+    # "how many feedback on calendar page" → scoped COUNT, never whole-table unique_users.
+    scope = feature_scope_terms(q)
+    if scope and (
+        _GROUP_INTENT.search(q)
+        or re.search(r"\bhow many\b|\breceiv|\breciev|\bgot\b|\bsubmitted\b", q, re.I)
+    ):
+        return _build_feature_scope_sql(fq, cols, q, scope)
+
     terms = _terms(q)
     if is_survey_answer_question(q) or _GROUP_INTENT.search(q) or is_feedback_table_question(q):
+        # Still prefer feature scope when a named page/feature is present.
+        if scope:
+            return _build_feature_scope_sql(fq, cols, q, scope)
         return _build_group_sql(fq, cols, q, terms=terms)
     if relaxed and terms:
+        if scope:
+            return _build_feature_scope_sql(fq, cols, q, scope)
         return _build_group_sql(fq, cols, q, terms=terms, min_score=1)
     return None
 
